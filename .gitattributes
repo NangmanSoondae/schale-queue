@@ -1,0 +1,19 @@
+# ============================================================================
+#  줄바꿈 정규화 — 저장소 기준은 LF (크로스 플랫폼 일관성)
+# ============================================================================
+* text=auto eol=lf
+
+# Windows 전용 스크립트는 CRLF 유지
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Unix 셸 스크립트는 반드시 LF (CRLF 시 실행 불가)
+gradlew text eol=lf
+*.sh    text eol=lf
+
+# 바이너리 — 변환 금지
+*.jar  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.keystore binary
