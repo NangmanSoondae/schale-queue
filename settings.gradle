@@ -1,0 +1,12 @@
+rootProject.name = 'schale-queue'
+
+// 멀티 모듈 구성 (docs/2_architecture.md)
+//  - module-core : 공통 도메인 / 영속성 (라이브러리)
+//  - module-api  : 사용자 대면 REST API (실행 모듈)
+//  - module-worker 는 Phase 3~4 도입 예정 (현재 미포함)
+include 'module-core'
+include 'module-api'
+
+// Monorepo 구조 유지: 실제 모듈 디렉터리는 backend/ 하위에 위치
+project(':module-core').projectDir = file('backend/module-core')
+project(':module-api').projectDir = file('backend/module-api')

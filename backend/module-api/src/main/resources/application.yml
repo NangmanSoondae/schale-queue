@@ -1,0 +1,38 @@
+# ============================================================================
+#  Schale Queue - module-api 설정
+#  ----------------------------------------------------------------------------
+#  [보안 원칙 — docs/5_code_of_conduct.md §5.5]
+#   · 이 파일에는 '구조와 플레이스홀더'만 둔다. 실제 민감 값은 절대 작성하지 않는다.
+#   · 민감 값(특히 DB_PASSWORD)은 .env 또는 application-secret.yml 로 분리 (gitignore 대상).
+#   · ${VAR:default} 형식에서 default 가 없는 값은 환경변수 주입이 필수다.
+# ============================================================================
+spring:
+  application:
+    name: schale-queue-api
+
+  # Java 21 Virtual Threads 활성화 (docs/2_architecture.md 전략 1)
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
+    username: ${DB_USERNAME:schale}
+    password: ${DB_PASSWORD}            # 기본값 없음 → 반드시 외부 주입 (.env / secret)
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate                # DDL 은 schema.sql 로 관리, 엔티티-스키마 검증만 수행
+    open-in-view: false                 # OSIV 비활성 — 영속성 컨텍스트 수명 제어
+    properties:
+      hibernate:
+        format_sql: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8080}

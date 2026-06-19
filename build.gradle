@@ -1,0 +1,53 @@
+// ============================================================================
+//  Schale Queue - Root build.gradle (멀티 모듈 공통 설정)
+//  ----------------------------------------------------------------------------
+//  [버전 선정 근거 — docs/5_code_of_conduct.md §5.6]
+//   · Java 21 (LTS)            : Virtual Threads 등 핵심 기능의 베이스. 장기 지원(LTS).
+//   · Spring Boot 3.4.5        : 프로젝트가 채택한 3.4.x 라인의 안정 패치 버전.
+//                                Spring Framework 6.2 기반, Java 21 정식 지원,
+//                                누적된 버그/보안 패치 반영. (3.4.x = 명세 고정)
+//   · dependency-management 1.1.7 : Spring Boot 3.4.x 와 호환되는 안정 버전.
+//                                Boot BOM 으로 의존성 버전을 일괄 관리한다.
+//   · Lombok                   : Boot BOM 관리 버전(1.18.x, Java 21 호환) 사용 — 명시 고정 불필요.
+//   · Gradle Wrapper 8.11.x 권장: Java 21 + Spring Boot 3.4 를 완전 지원하는 8.x 안정 라인.
+// ============================================================================
+
+plugins {
+    id 'org.springframework.boot' version '3.4.5' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+}
+
+// 모든 하위 모듈에 공통 적용
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+
+    group = 'com.schale'
+    version = '0.0.1-SNAPSHOT'
+
+    // Java 21 툴체인 — 빌드 JDK 와 무관하게 21 로 컴파일/실행을 보장
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    // 모든 모듈 공통 의존성 (Lombok, 테스트)
+    dependencies {
+        compileOnly 'org.projectlombok:lombok'
+        annotationProcessor 'org.projectlombok:lombok'
+        testCompileOnly 'org.projectlombok:lombok'
+        testAnnotationProcessor 'org.projectlombok:lombok'
+
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+}

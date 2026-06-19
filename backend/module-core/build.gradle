@@ -1,0 +1,25 @@
+// ============================================================================
+//  module-core : 공통 도메인 / 영속성 모듈
+//  ----------------------------------------------------------------------------
+//  실행 가능한 애플리케이션이 아니라 다른 모듈이 의존하는 '라이브러리'다.
+//  따라서 실행형 bootJar 는 끄고, 일반 라이브러리 jar 를 생성한다.
+// ============================================================================
+
+// 라이브러리 모듈 설정: bootJar = false, jar = true
+bootJar {
+    enabled = false
+}
+jar {
+    enabled = true
+}
+
+dependencies {
+    // 영속성: Spring Data JPA
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // 인메모리: Redis (대기열 / 분산 락 / 캐시 — Phase 3 본격 사용)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // DB 드라이버: MariaDB (버전은 Spring Boot BOM 관리)
+    runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
+}
