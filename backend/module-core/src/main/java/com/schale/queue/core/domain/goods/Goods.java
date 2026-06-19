@@ -1,0 +1,55 @@
+package com.schale.queue.core.domain.goods;
+
+import com.schale.queue.core.domain.BaseTimeEntity;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.Table;
+import java.time.LocalDateTime;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+/**
+ * 상품 엔티티.
+ *
+ * <p>읽기 위주의 저빈도 변경 데이터. 쓰기 경합이 집중되는 재고({@code Stock})와는
+ * 1:1 로 분리되어, 재고 차감 락이 상품 조회에 간섭하지 않는다. (ADR-001 참조)
+ */
+@Getter
+@Entity
+@Table(name = "goods")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Goods extends BaseTimeEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String name;
+
+    @Lob
+    @Column
+    private String description;
+
+    /** 판매 가격 (KRW, 정수). */
+    @Column(nullable = false)
+    private Long price;
+
+    /** 판매 오픈 일시 (선착순 시작 기준). */
+    @Column(name = "open_at", nullable = false)
+    private LocalDateTime openAt;
+
+    @Builder
+    private Goods(String name, String description, Long price, LocalDateTime openAt) {
+        this.name = name;
+        this.description = description;
+        this.price = price;
+        this.openAt = openAt;
+    }
+}
