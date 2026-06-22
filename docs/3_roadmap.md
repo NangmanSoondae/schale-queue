@@ -59,7 +59,7 @@ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5
 - **Kafka 도입 및 이벤트 기반 아키텍처(Event-Driven Architecture) 전환** — 대기열을 통과한 주문/결제를 Kafka 토픽으로 발행하고, 주문·결제·알림·정산 컨슈머가 구독하여 **비동기·무유실**로 처리한다. (근거: [`7_adr_002_queue_architecture.md`](./7_adr_002_queue_architecture.md))
   - 후방 처리를 동기 호출에서 **이벤트 발행/구독(Pub/Sub)**으로 분리 → 서비스 간 결합도↓, 독립 확장
   - 결제 실패/타임아웃의 재처리·재시도를 오프셋 기반으로 견고하게 설계
-- 주문 완료/실패 등 **비동기 알림 처리** 파이프라인 구축 (Kafka 컨슈머로 구현)
+- 주문 완료/실패 등 **비동기 알림 처리** 파이프라인 구축 (Kafka 컨슈머로 구현) — 발송은 공용 알림 게이트웨이로 분리 예정 ([`8_adr_003_notification_externalization.md`](./8_adr_003_notification_externalization.md))
 - 사용자 응답과 분리된 백그라운드 작업 흐름 정립
 - **MCP(Model Context Protocol)**를 활용한 **AI 어드민 제어 환경** 구축 — 자연어 기반 상품/재고/주문 운영 및 모니터링 실험
 
