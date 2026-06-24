@@ -120,9 +120,9 @@
    - `docs/result/` 는 사용자와 AI 파트너의 **리뷰용 임시 전달 폴더**이므로, 프로젝트 메인 형상 관리(Git)에 포함하지 않는다.
    - `.gitignore` 에 `docs/result/` 를 등록하여 원격에 절대 올라가지 않도록 한다.
 
-### 5.3.4. Discord 작업 알림 프로토콜 (🔔 다이렉트 알림)
+### 5.3.4. 작업 알림 프로토콜 (🔔 게이트웨이 경유 + 웹훅 폴백)
 
-> ⚠️ **현행은 잠정(interim) 방식이다.** 아래 `curl` 직접 호출은 추후 **공용 알림 게이트웨이(`notify-gateway`)** 호출로 교체될 예정이다. 결정·교체 트리거·롤백 절차는 [`8_adr_003_notification_externalization.md`](./8_adr_003_notification_externalization.md) 참조. (교체 전까지는 본 절의 curl 방식을 그대로 사용한다.)
+> ✅ **게이트웨이 전환 완료(2026-06-25).** 본래 Discord 웹훅 직접 호출(잠정)은 **공용 알림 게이트웨이(`notify-gateway`)** 호출로 **교체되었다**. 이제 작업 알림은 **1차로 게이트웨이 API**(`POST /api/v1/notifications`, `to=schale-ops`)를 호출하고, 게이트웨이가 도달 불가일 때만 **웹훅 직접 호출로 폴백**한다(롤백 안전망 보존). 결정·교체 트리거·롤백 절차는 [`8_adr_003_notification_externalization.md`](./8_adr_003_notification_externalization.md) §4 참조.
 
 > **트리거**: 다음 중 하나가 발생하는 순간.
 > 1. 지정된 **긴 작업**(전체 빌드, 통합/동시성 테스트, 인프라 기동 등)이 **완료**되었을 때.
@@ -132,22 +132,35 @@
 
 **1) 알림 전송 명령**
 
-트리거 발생 즉시 아래 `curl` 을 실행하여 Discord 웹훅으로 알림을 전송한다. 웹훅 URL 은 환경변수 `$DISCORD_WEBHOOK_URL` 로 주입한다.
+이모지 본문의 멀티바이트 깨짐을 피하기 위해 페이로드는 **UTF-8 파일 + `--data-binary`** 로 보낸다(게이트웨이 troubleshooting 교훈).
 
-```bash
-curl -H "Content-Type: application/json" \
-  -d '{"content": "🤖 **[Claude Code 알림]**\n- **상태**: 작업 완료 (또는 승인 대기)\n- **내용**: 샬레 큐(Schale Queue) 관련 최근 작업이 완료되었거나 확인이 필요합니다."}' \
-  "$DISCORD_WEBHOOK_URL"
-```
+- **1차 (게이트웨이 API · 기본)** — 채널·수신자·내용만 게이트웨이에 넘기고, 실제 웹훅 URL/벤더 키는 게이트웨이가 보유한다(시크릿 중앙화). `to`는 게이트웨이에 등록된 schale-queue 논리 채널 alias `schale-ops`. URL·키는 `.env`의 `$NOTIFY_GATEWAY_URL`·`$NOTIFY_GATEWAY_API_KEY`.
 
-> 💡 실제 상황에 맞게 `상태`/`내용` 문구를 구체화해 보내면 더 유용하다. (예: "통합 테스트 6/6 통과", "DB 권한 승인 대기 중")
+  ```bash
+  # payload.json (UTF-8): {"channel":"discord","to":"schale-ops","title":"[Claude Code 알림]","message":"🤖 샬레 큐 작업 완료/승인 대기"}
+  curl -X POST "$NOTIFY_GATEWAY_URL/api/v1/notifications" \
+    -H "Authorization: Bearer $NOTIFY_GATEWAY_API_KEY" \
+    -H "Content-Type: application/json" \
+    --data-binary @payload.json
+  ```
+
+- **폴백 (게이트웨이 미기동/도달 불가)** — 게이트웨이가 떠 있지 않으면 기존 방식인 Discord 웹훅 직접 호출(`$DISCORD_WEBHOOK_URL`)로 폴백한다(현행 방식 보존 — ADR-003 §4 롤백 안전망).
+
+  ```bash
+  # payload-discord.json (UTF-8): {"content":"🤖 **[Claude Code 알림]** 샬레 큐 작업 완료/승인 대기"}
+  curl -H "Content-Type: application/json" --data-binary @payload-discord.json "$DISCORD_WEBHOOK_URL"
+  ```
+
+> 💡 실제 상황에 맞게 `title`/`message`(또는 폴백의 `content`) 문구를 구체화해 보내면 더 유용하다. (예: "통합 테스트 6/6 통과", "DB 권한 승인 대기 중")
+>
+> ⚙️ **운영 전제**: 1차 경로는 게이트웨이가 실행 중이어야 한다(`notify-gateway`에서 `./gradlew bootRun` 또는 jar). 미실행 시 위 폴백을 사용하며, 어느 쪽도 불가하면 아래 2-2에 따라 **알림을 건너뛰고** 작업 흐름엔 영향을 주지 않는다.
 
 **2) 보안 및 운영 원칙**
 
-1. **웹훅 URL 은 시크릿이다.** Discord 웹훅 URL 을 아는 누구나 채널에 글을 쓸 수 있으므로, **§5.3.2 보안 프로토콜의 적용 대상**이다.
+1. **웹훅 URL·게이트웨이 API Key는 시크릿이다.** Discord 웹훅 URL 을 아는 누구나 채널에 글을 쓸 수 있고, 게이트웨이 API Key 는 발송 권한 그 자체이므로 **§5.3.2 보안 프로토콜의 적용 대상**이다.
    - 실제 값은 `.env`(gitignore 차단)에만 두고, **코드/문서/커밋/터미널 출력에 절대 노출하지 않는다.**
-   - `.env.example` 에는 **빈 플레이스홀더(`DISCORD_WEBHOOK_URL=`)만** 둔다.
-2. **미설정 시 graceful 처리.** `$DISCORD_WEBHOOK_URL` 이 비어 있으면(미설정) 알림 전송을 **건너뛰고**, 본래 작업의 흐름·결과 보고에는 영향을 주지 않는다.
+   - `.env.example` 에는 **빈 플레이스홀더(`NOTIFY_GATEWAY_URL=`·`NOTIFY_GATEWAY_API_KEY=`·`DISCORD_WEBHOOK_URL=`)만** 둔다.
+2. **미설정 시 graceful 처리.** 1차(게이트웨이) 도달 불가 + 폴백(`$DISCORD_WEBHOOK_URL`)도 비어 있으면 알림 전송을 **건너뛰고**, 본래 작업의 흐름·결과 보고에는 영향을 주지 않는다.
 3. **남용 금지.** 모든 사소한 명령마다 보내지 않는다. **'하나의 논리적 작업'의 완료** 또는 **실질적인 승인 대기** 등 사용자의 주의가 필요한 변곡점에서만 전송한다.
 
 ## 5.4. 개발 가이드라인 (Development Guidelines)

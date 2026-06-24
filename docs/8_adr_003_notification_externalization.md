@@ -2,8 +2,8 @@
 
 > **ADR(Architecture Decision Record)**: 현재 schale-queue 내부에서 직접 처리하는 Discord 알림을, 여러 프로젝트가 공용으로 쓰는 **독립 알림 게이트웨이 서비스**로 분리하기로 한 결정과 그 점진 교체 전략을 기록한다.
 
-- **상태(Status)**: Accepted (적용은 단계적 — **현행 curl 유지** → 게이트웨이 완성 시 **교체**)
-- **일자**: 2026-06-22
+- **상태(Status)**: Accepted · **교체 완료(2026-06-25)** — 게이트웨이 1차 호출(`to=schale-ops`) + 웹훅 직접 호출은 폴백으로 보존(§4 롤백 안전망). 상세는 §5.3.4.
+- **일자**: 2026-06-22 (교체 적용 2026-06-25)
 - **관련 Phase**: Phase 4(비동기 알림 파이프라인 / EDA)와 연계 — [`3_roadmap.md`](./3_roadmap.md), [`7_adr_002_queue_architecture.md`](./7_adr_002_queue_architecture.md)
 - **결정 대상**: §5.3.4 Discord 작업 알림의 발송 책임을 어디에 둘 것인가
 
@@ -99,6 +99,8 @@ Content-Type: application/json
 3. `.env.example` 키 목록 동기화
 
 **롤백** — 교체 후 문제가 생기면, §5.3.4의 **현행 curl(웹훅 직접 호출)로 즉시 복귀**할 수 있다. (현행 방식을 제거하지 않고 보존해 두는 것이 롤백 안전망이다.)
+
+> ✅ **교체 완료(2026-06-25).** 트리거 3개 충족(게이트웨이 `POST /api/v1/notifications` 실동작 · `schale-ops` 논리 채널 게이트웨이 등록 · 프로젝트별 API Key 인증). 절차 1~3 적용: §5.3.4를 게이트웨이 1차 호출로 교체, `.env`에 `NOTIFY_GATEWAY_URL`·`NOTIFY_GATEWAY_API_KEY` 추가(게이트웨이 schale-queue 전용 키), `DISCORD_WEBHOOK_URL`은 폴백으로 **보존**(완전 제거 대신 롤백 안전망 유지로 결정). 실발송 200 SUCCESS·Discord 도착 실증. ※ 재시도·429 백오프는 게이트웨이 후속 ADR로 보류 — 현 단계는 단건 동기 발송.
 
 ---
 
