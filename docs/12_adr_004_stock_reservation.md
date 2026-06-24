@@ -46,6 +46,8 @@ ADR-001의 `remainQuantity`를 `availableQuantity`로 바꾸고 `reservedQuantit
 | `reservedQuantity` | 가변 | 예약했으나 결제 전(보류) 수량 |
 | `soldQuantity` | 가변 | 결제 확정된 판매 수량 |
 
+> 🔄 **후속 refine (2026-06-24)**: 취소표 쿨다운(되팔이 방지) 도입 시 4번째 가변 버킷 `cooldownQuantity`가 추가되어 불변식이 `total = available + reserved + sold + cooldown`으로 확장된다(예매형 활성). 근거: [`14_adr_006_refund_cancellation_policy.md`](./14_adr_006_refund_cancellation_policy.md) §4 · `P-R6`.
+
 ### 결정 3. 합계 불변식을 정합성 자가검증 기준으로 둔다
 
 ```
