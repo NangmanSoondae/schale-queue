@@ -80,9 +80,9 @@
 - **사전조건**: 유효한 입장 토큰
 - **기본 흐름**:
   1. 입장 토큰 검증
-  2. **재고 차감**(Stock 단일 행, JPA 비관적 락 / scale-out 시 Redis 분산 락)
+  2. **재고 예약**(Stock 단일 행 `available--, reserved++`, JPA 비관적 락 / scale-out 시 Redis 분산 락 — P-S2)
   3. Order + OrderItem 생성(주문의 확정 사실), Payment 생성(status=PENDING, timeoutAt 설정)
-- **불변식**: `remainQuantity >= 0` 항상 성립, 오버셀 0건 (S5/S6)
+- **불변식**: `availableQuantity >= 0` 항상 성립, 오버셀 0건 (S5/S6, P-S1)
 - **예외**: 재고 소진 → 주문 거부(품절 안내) / 토큰 만료 → 거부
 - **관련 API(초안)**: `POST /orders`
 

@@ -27,15 +27,23 @@
 
 ADR-001 결정 1(Goods↔Stock 분리) 기준. 쓰기 경합 집중 영역.
 
+**재고 모델 = 예약 기반 3-카운터(확정).** Stock 테이블이 가변 카운터 3개를 보유하고, 불변 기준값 `totalQuantity`를 둔다.
+
+```
+totalQuantity(불변) = availableQuantity + reservedQuantity + soldQuantity
+```
+
 | ID | 정책 | 규칙 | 근거 |
 | :-- | :--- | :--- | :--- |
-| **P-S1** | 오버셀 금지(최우선) | `remainQuantity >= 0` **항상 성립**. 초과 차감 절대 불가 | NFR S5/S6 (타협 불가) |
-| **P-S2** | 차감 시점 | 재고는 **주문 생성 트랜잭션에서 즉시 차감**(예약형 아님, 단순화) *(확정 필요)* | UC-05 |
-| **P-S3** | 락 전략 | 단일 DB = **JPA 비관적 락**(`FOR UPDATE`, Stock 단일 행). Scale-out = **Redis 분산 락** | ADR-001 §2 / 아키텍처 §2.4 |
-| **P-S4** | 재고 복원 | 결제 실패/타임아웃/주문 취소 시 차감분을 **원복**(P-O2와 연동) | UC-06/UC-07 |
+| **P-S1** | 오버셀 금지(최우선) | `availableQuantity >= 0` **항상 성립** + 합계 불변식 `total = available + reserved + sold` 유지. 초과 차감 절대 불가 | NFR S5/S6 (타협 불가) |
+| **P-S2** | 차감 모델 (**확정: B안**) | **예약 기반 즉시 차감.** 주문 생성 시 `available--, reserved++`(soft hold, 원자적). 결제 확정 시 `reserved--, sold++`. 만료/실패/취소 시 `reserved--, available++`(해제) | UC-05/UC-06/UC-07 |
+| **P-S3** | 락 전략 | 단일 DB = **JPA 비관적 락**(`FOR UPDATE`, Stock 단일 행)으로 다중 카운터 갱신을 한 임계구역에 묶음. Scale-out = **Redis 분산 락** | ADR-001 §2 / 아키텍처 §2.4 |
+| **P-S4** | 재고 해제(복원) | 결제 실패/타임아웃/주문 취소 시 `reserved--, available++`로 예약 해제(P-O2와 연동) | UC-06/UC-07 |
 | **P-S5** | 재고 표시 | 목록/상세의 재고는 **근사치 허용**(캐시), 확정 정합성은 주문 시점에만 보장 | ADR-001 §3 / UC-01 |
 
-> **P-S2 확정 필요**: "주문 시 즉시 차감"(단순·강한 보장) vs "예약 후 결제 확정 시 확정 차감"(재고 점유 시간↑, UX 유연). 초안은 **즉시 차감 + 실패 시 복원(P-S4)**.
+> **P-S2 확정됨 (B안)**: "예약 후 즉시 차감 + 시한부 hold(`Payment.timeoutAt`) + 만료 시 자동 해제" 모델로 확정. oversell은 주문 시점 `available > 0` 가드로 차단하고, 재고 묶임은 TTL 기반 해제(UC-07)로 방지한다. 단일 카운터(A안) 대비 **예약/판매 개수의 관측성**을 얻는 대신, 전이마다 두 카운터를 **원자적으로 함께 갱신**(P-S3 락 범위)해야 한다.
+>
+> ⚠️ **스키마 영향**: 본 결정은 ADR-001의 Stock 컬럼(`totalQuantity` / `remainQuantity`)을 **`totalQuantity` + `availableQuantity` + `reservedQuantity` + `soldQuantity`로 확장**한다. ADR-001은 Accepted 상태이므로 **추가 결정(addendum) 또는 신규 ADR로 기록**한다. (확정 대기 §11.6)
 
 ---
 
@@ -71,11 +79,11 @@ ADR-001 결정 2 + ADR-002 §3.4(무결성) 기준. 변동성·외부 의존 격
 **결제 타임아웃 → 재고 환원 → 다음 대기자 입장** (가장 중요한 회복 경로)
 
 ```
-주문 생성(P-O1) ─ 재고 즉시 차감(P-S2) ─ Payment PENDING(timeoutAt)
+주문 생성(P-O1) ─ 재고 예약(P-S2: available→reserved) ─ Payment PENDING(timeoutAt)
         │
-        ├─ 결제 성공(P-P1) ──▶ Order PAID ──▶ Kafka 완료 이벤트(P-P3) ──▶ 알림(UC-08)
+        ├─ 결제 성공(P-P1) ──▶ reserved→sold(P-S2) ─ Order PAID ─ Kafka 완료 이벤트(P-P3) ─ 알림(UC-08)
         │
-        └─ timeoutAt 경과(P-O2) ──▶ Worker 정리(UC-07) ──▶ 재고 복원(P-S4)
+        └─ timeoutAt 경과(P-O2) ──▶ Worker 정리(UC-07) ──▶ 재고 해제(P-S4: reserved→available)
                                                               └─▶ 입장 가속(P-Q4) ── 다음 대기자에게 기회
 ```
 
@@ -86,7 +94,8 @@ ADR-001 결정 2 + ADR-002 §3.4(무결성) 기준. 변동성·외부 의존 격
 ## 11.6. 확정 대기 항목
 
 - [ ] **P-Q5** 큐 유실 시 순번 보존 여부
-- [ ] **P-S2** 즉시 차감 vs 예약형 차감
+- [x] **P-S2** 차감 모델 → **B안(예약 기반 3-카운터) 확정** (2026-06-24)
+- [ ] **ADR-001 추가 결정** Stock 스키마 확장(`available`/`reserved`/`sold`) 기록 — P-S2 후속
 - [ ] **P-O3** 1인 구매 한도(K)
 - [ ] **P-Q3** 입장 토큰 TTL(N분)
 - [ ] **P-O5/P-P4** 환불·재시도 상세 범위

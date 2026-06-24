@@ -30,8 +30,8 @@
 | S2 | **순번 조회 지연** | p99 < 50ms | `GET /queue/rank` (ZRANK) | Phase 3 부하 테스트 |
 | S3 | **입장 처리율(throughput)** | DB 유입 ≤ 500 TPS로 **평탄화** | Worker dequeue rate | Phase 3 — rate 파라미터 |
 | S4 | **주문 임계구역 지연** | p99 < 200ms | 주문 생성 + 재고 차감 트랜잭션 | Phase 2/3 |
-| S5 | **오버셀(oversell)** | **0건** (재고 1,000 → 정확히 1,000 판매) | Stock.remainQuantity | Phase 2 동시성 테스트 |
-| S6 | **재고 정합성** | remain ≥ 0 **항상 성립** | DB 불변식 | Phase 2 — 동시성 테스트 |
+| S5 | **오버셀(oversell)** | **0건** (재고 1,000 → 정확히 1,000 판매) | Stock 카운터 (sold ≤ total) | Phase 2 동시성 테스트 |
+| S6 | **재고 정합성** | `available ≥ 0` **및** `total = available+reserved+sold` 항상 성립 | DB 불변식 (P-S1) | Phase 2 — 동시성 테스트 |
 | S7 | **에러율** | 오픈 피크 구간 5xx < 0.1% | API 게이트웨이/액추에이터 | Phase 3 |
 | S8 | **주문/결제 이벤트 무유실** | 유실 0건 (at-least-once 이상) | Kafka 컨슈머 오프셋 | Phase 4 |
 
