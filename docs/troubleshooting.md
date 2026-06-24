@@ -110,3 +110,39 @@ CLI(`docker compose up`, `docker info`)는 정상 동작하는데 Testcontainers
 
 ### 5) 결과 (Result)
 `RUN_DB_IT=true`로 실행하여 **`StockConcurrencyTest` 1건 통과(잔여 0, 성공 100, 실패 0 — 초과 판매 0건)**, 단위 테스트 `StockServiceTest` 2건도 통과했다. 비관적 락이 실제 MariaDB에서 의도대로 동작함을 증명했다. 또한 게이팅 덕분에 인프라 없는 일반 `./gradlew build`는 영향받지 않는다. (Testcontainers는 추후 엔진/TC 버전 정합이 맞을 때 CI 이식성 목적으로 재도입 검토)
+
+---
+
+## [No.04] Discord 웹훅 알림이 `400 (code 50109, invalid JSON)`으로 거부됨
+
+- **일자**: 2026-06-24
+- **관련 Phase**: Phase 3 (대기열 슬라이스 ①+② 완료 알림, §5.3.4)
+- **태그**: `#Discord` `#인코딩` `#GitBash` `#curl` `#Windows`
+
+### 1) 발견 (Discovery)
+슬라이스 완료 알림을 §5.3.4의 `curl` 인라인 `-d '{...}'` 방식으로 Discord 웹훅에 전송하자 거부됐다.
+
+```log
+응답 코드: 400
+본문: {"message": "The request body contains invalid JSON.", "code": 50109}
+```
+
+웹훅 URL 자체는 정상이었다(형식 점검 결과 `https://discord.com/api/webhooks/...` 일치). 콘텐츠에는 한글·이모지(🤖)·원문자(①②)가 포함돼 있었다.
+
+### 2) 분석 (Analysis)
+- 1차 시도는 URL 끝 CRLF(`\r`) 의심으로 `tr -d '\r'` 후 재시도했으나 동일하게 `400 50109`였다 → URL 문제 아님.
+- 근본 원인은 **Windows Git Bash 셸이 커맨드라인 인라인 문자열의 멀티바이트 UTF-8(한글/이모지/원문자)을 깨뜨려 curl에 전달**한 것이다. 깨진 바이트열이 JSON 문자열을 무효화해 Discord가 `50109`(invalid JSON)를 반환했다. 즉 JSON 구조가 아니라 **인코딩**이 문제.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — 인라인 문자열 유지 + 이스케이프 보강**: 셸 인코딩 자체가 원인이라 근본 해결이 아니며 환경마다 불안정.
+- **방안 B — ASCII로만 콘텐츠 작성**: 메시지 가독성(한글 상태 문구)을 희생. 임시방편.
+- **방안 C — 페이로드를 UTF-8 파일로 저장 후 `--data-binary @file` 전송(채택)**: 셸의 문자열 처리 경로를 우회해 파일 바이트를 그대로 전송하므로 인코딩 손상이 없다. 한글·이모지 유지 가능.
+
+### 4) 해결 (Resolution)
+방안 C를 채택했다.
+- 알림 JSON을 UTF-8 파일(스크래치패드)에 작성(Write 도구로 생성 → BOM 없는 UTF-8 보장).
+- 전송: `curl -H "Content-Type: application/json; charset=utf-8" --data-binary "@payload.json" "$WEBHOOK"`.
+- 웹훅 값은 `.env`에서만 로드하고 터미널에 출력하지 않음(§5.3.2 준수).
+
+### 5) 결과 (Result)
+**응답 코드 `204`(성공)** 로 알림이 정상 전송됐다. 한글·이모지가 깨지지 않고 채널에 표시됐다. 교훈: Git Bash에서 멀티바이트 본문을 외부 프로세스에 넘길 때는 인라인 문자열 대신 **UTF-8 파일 + `--data-binary @file`** 을 기본 패턴으로 삼는다. (이 원칙은 향후 `notify-gateway` 전환 시에도 페이로드 전달에 동일 적용 가능)
