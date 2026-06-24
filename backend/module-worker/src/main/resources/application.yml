@@ -1,0 +1,34 @@
+# ============================================================================
+#  Schale Queue - module-worker 설정
+#  ----------------------------------------------------------------------------
+#  [보안 원칙 — docs/5_code_of_conduct.md §5.3.2]
+#   · 이 파일에는 '구조와 플레이스홀더'만 둔다. 실제 민감 값은 절대 작성하지 않는다.
+#   · 민감 값(특히 DB_PASSWORD)은 .env 또는 application-secret.yml 로 분리 (gitignore 대상).
+#
+#  워커는 웹 계층이 없는 백그라운드 모듈이라 server 포트 설정이 없다.
+#  module-core 에 의존하므로 JPA 데이터소스와 Redis 접속 정보를 동일하게 주입한다.
+# ============================================================================
+spring:
+  application:
+    name: schale-queue-worker
+
+  # Java 21 Virtual Threads 활성화 (docs/2_architecture.md 전략 1)
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
+    username: ${DB_USERNAME:schale}
+    password: ${DB_PASSWORD}            # 기본값 없음 → 반드시 외부 주입 (.env / secret)
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate                # DDL 은 schema.sql 로 관리, 엔티티-스키마 검증만 수행
+    open-in-view: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
