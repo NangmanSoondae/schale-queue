@@ -43,7 +43,7 @@ totalQuantity(불변) = availableQuantity + reservedQuantity + soldQuantity
 
 > **P-S2 확정됨 (B안)**: "예약 후 즉시 차감 + 시한부 hold(`Payment.timeoutAt`) + 만료 시 자동 해제" 모델로 확정. oversell은 주문 시점 `available > 0` 가드로 차단하고, 재고 묶임은 TTL 기반 해제(UC-07)로 방지한다. 단일 카운터(A안) 대비 **예약/판매 개수의 관측성**을 얻는 대신, 전이마다 두 카운터를 **원자적으로 함께 갱신**(P-S3 락 범위)해야 한다.
 >
-> ⚠️ **스키마 영향**: 본 결정은 ADR-001의 Stock 컬럼(`totalQuantity` / `remainQuantity`)을 **`totalQuantity` + `availableQuantity` + `reservedQuantity` + `soldQuantity`로 확장**한다. ADR-001은 Accepted 상태이므로 **추가 결정(addendum) 또는 신규 ADR로 기록**한다. (확정 대기 §11.6)
+> ⚠️ **스키마 영향**: 본 결정은 ADR-001의 Stock 컬럼(`totalQuantity` / `remainQuantity`)을 **`totalQuantity` + `availableQuantity` + `reservedQuantity` + `soldQuantity`로 확장**한다. 형식 기록: [`12_adr_004_stock_reservation.md`](./12_adr_004_stock_reservation.md).
 
 ---
 
@@ -95,7 +95,7 @@ ADR-001 결정 2 + ADR-002 §3.4(무결성) 기준. 변동성·외부 의존 격
 
 - [ ] **P-Q5** 큐 유실 시 순번 보존 여부
 - [x] **P-S2** 차감 모델 → **B안(예약 기반 3-카운터) 확정** (2026-06-24)
-- [ ] **ADR-001 추가 결정** Stock 스키마 확장(`available`/`reserved`/`sold`) 기록 — P-S2 후속
+- [x] **ADR-004** Stock 스키마 확장(`available`/`reserved`/`sold`) 형식 기록 (2026-06-24)
 - [ ] **P-O3** 1인 구매 한도(K)
 - [ ] **P-Q3** 입장 토큰 TTL(N분)
 - [ ] **P-O5/P-P4** 환불·재시도 상세 범위
