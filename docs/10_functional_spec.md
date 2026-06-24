@@ -71,8 +71,8 @@
 
 ### UC-04. 입장 (Dequeue → 입장 토큰)
 - **액터**: 시스템 워커
-- **흐름**: Worker가 정해진 처리율(rate)만큼 ZSET 앞에서부터 꺼내 **입장 토큰** 발급 → 해당 회원만 주문 가능
-- **정책**: 입장률 = DB 보호 상한(S3), 입장 토큰 TTL 존재(P-Q3)
+- **흐름**: Worker가 정해진 처리율(rate)만큼 ZSET 앞에서부터 꺼내 **입장 토큰** 발급(Redis 키 `admission:{goodsId}:{memberId}` + TTL) → 해당 회원만 주문 가능
+- **정책**: 입장률 = DB 보호 상한(S3), 입장 토큰 = **Redis 키+TTL(전역 5분, P-Q3)**, 만료 시 재진입 필요
 - **비고**: 입장 토큰 ≠ 회원 인증. 입장 권한만 증명.
 
 ### UC-05. 주문 생성 + 재고 차감 (임계구역)
@@ -80,10 +80,11 @@
 - **사전조건**: 유효한 입장 토큰
 - **기본 흐름**:
   1. 입장 토큰 검증
-  2. **재고 예약**(Stock 단일 행 `available--, reserved++`, JPA 비관적 락 / scale-out 시 Redis 분산 락 — P-S2)
-  3. Order + OrderItem 생성(주문의 확정 사실), Payment 생성(status=PENDING, timeoutAt 설정)
+  2. **1인 한도 검사**: 회원의 해당 상품 활성(예약+확정) 수량 < `Goods.maxPurchasePerMember` (P-O3, `(member,goods)` 유니크 제약)
+  3. **재고 예약**(Stock 단일 행 `available--, reserved++`, JPA 비관적 락 / scale-out 시 Redis 분산 락 — P-S2)
+  4. Order + OrderItem 생성(주문의 확정 사실), Payment 생성(status=PENDING, **timeoutAt = now + `Goods.paymentTimeoutMinutes`** — P-O2)
 - **불변식**: `availableQuantity >= 0` 항상 성립, 오버셀 0건 (S5/S6, P-S1)
-- **예외**: 재고 소진 → 주문 거부(품절 안내) / 토큰 만료 → 거부
+- **예외**: 재고 소진 → 주문 거부(품절 안내) / 토큰 만료 → 거부 / **한도 초과 → 거부**(P-O3)
 - **관련 API(초안)**: `POST /orders`
 
 ### UC-06. 결제 (Payment)

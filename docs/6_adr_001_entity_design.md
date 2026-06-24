@@ -37,7 +37,10 @@
 - **Goods**: name, description, price, openAt 등 **읽기 위주(read-heavy)**, 변경 빈도가 낮은 데이터.
 - **Stock**: totalQuantity, remainQuantity 등 **쓰기 경합(write-contended)**이 집중되는 데이터.
 
-> 🔄 **후속 refine (2026-06-24)**: Stock의 차감 모델과 카운터 스키마는 [`12_adr_004_stock_reservation.md`](./12_adr_004_stock_reservation.md)에서 **예약 기반 3-카운터(`total` + `available`/`reserved`/`sold`)**로 확장되었다. 본 ADR-001의 1:1 분리·단일 행 락 원칙은 그대로 유효하다.
+> 🔄 **후속 refine (2026-06-24)**:
+> - Stock의 차감 모델과 카운터 스키마는 [`12_adr_004_stock_reservation.md`](./12_adr_004_stock_reservation.md)에서 **예약 기반 3-카운터(`total` + `available`/`reserved`/`sold`)**로 확장되었다.
+> - Goods에는 **상품별 운영 설정** `maxPurchasePerMember`(1인 한도, 기본 1)·`paymentTimeoutMinutes`(결제창, 기본 10·1~30분)가 추가된다(변경 적은 설정 메타정보 → Stock이 아닌 Goods). 근거: [`11_domain_policy.md`](./11_domain_policy.md) P-O2·P-O3.
+> - 본 ADR-001의 1:1 분리·단일 행 락 원칙은 그대로 유효하다.
 
 이렇게 분리하면, 재고 차감을 위한 비관적 락(`SELECT ... FOR UPDATE`)이 **오직 Stock 테이블의 단일 행에만 걸린다.** 상품 정보 조회는 락과 무관하게 자유롭게(그리고 캐시 가능하게) 수행된다. 락의 영향 범위(blast radius)를 최소화하는 것이 핵심이다.
 
