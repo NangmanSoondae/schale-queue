@@ -7,7 +7,8 @@ package com.schale.queue.core.domain.queue;
  * 모든 대기열 키는 반드시 이 클래스를 통해 생성한다.
  *
  * <ul>
- *   <li><b>대기열(ZSET)</b> {@code queue:{goodsId}} — score=진입 timestamp, member=memberId (P-Q1 FIFO)</li>
+ *   <li><b>대기열(ZSET)</b> {@code queue:{goodsId}} — score=진입 시각+시퀀스, member=memberId (P-Q1 FIFO)</li>
+ *   <li><b>진입 시퀀스(String 카운터)</b> {@code queue:{goodsId}:seq} — 같은 ms 동점 해소용 단조 증가</li>
  *   <li><b>입장 토큰(String+TTL)</b> {@code admission:{goodsId}:{memberId}} — 전역 TTL(P-Q3)</li>
  * </ul>
  */
@@ -16,9 +17,14 @@ public final class QueueKeys {
     private QueueKeys() {
     }
 
-    /** 상품별 대기열 ZSET 키. score=진입 timestamp, member=memberId. */
+    /** 상품별 대기열 ZSET 키. score=진입 시각+시퀀스, member=memberId. */
     public static String waitingQueue(Long goodsId) {
         return "queue:" + goodsId;
+    }
+
+    /** 상품별 진입 시퀀스 키. 같은 밀리초 진입자를 도착 순서로 구분하는 단조 증가 카운터(P-Q1). */
+    public static String sequence(Long goodsId) {
+        return "queue:" + goodsId + ":seq";
     }
 
     /** 입장 토큰 키(P-Q3 규약 {@code admission:{goodsId}:{memberId}}). */
