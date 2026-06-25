@@ -90,6 +90,7 @@
 - 타입 예시: `feat`(기능), `fix`(버그 수정), `docs`(문서), `chore`(빌드/설정), `refactor`(리팩터링), `test`(테스트), `style`(포맷).
 - 형식: `type(scope): subject` — 예) `feat(core): 핵심 엔티티 6종 및 DDL 추가`
 - 커밋 전 **§5.3.2 보안 프로토콜**을 반드시 함께 점검한다.
+- 브랜치 분기·push·PR 머지 흐름은 **§5.3.5 Git 브랜치 전략**을 따른다(`main` 다이렉트 커밋·푸시 금지).
 
 **2) Notion Sync**
 
@@ -162,6 +163,44 @@
    - `.env.example` 에는 **빈 플레이스홀더(`NOTIFY_GATEWAY_URL=`·`NOTIFY_GATEWAY_API_KEY=`·`DISCORD_WEBHOOK_URL=`)만** 둔다.
 2. **미설정 시 graceful 처리.** 1차(게이트웨이) 도달 불가 + 폴백(`$DISCORD_WEBHOOK_URL`)도 비어 있으면 알림 전송을 **건너뛰고**, 본래 작업의 흐름·결과 보고에는 영향을 주지 않는다.
 3. **남용 금지.** 모든 사소한 명령마다 보내지 않는다. **'하나의 논리적 작업'의 완료** 또는 **실질적인 승인 대기** 등 사용자의 주의가 필요한 변곡점에서만 전송한다.
+
+### 5.3.5. Git 브랜치 전략 프로토콜 (GitHub Flow · 엄격)
+
+> **트리거**: 코드/문서 변경을 **시작할 때**(브랜치 분기)와, '하나의 논리적 작업'을 마쳐 **반영할 때**(PR).
+> **전제**: `main`은 **항상 배포 가능 상태**로 유지한다. 공용 알림 레포(`notify-gateway`)와 **동일한 전략**을 공유한다.
+
+**1) 전략 — GitHub Flow**
+
+- ⛔ **`main` 다이렉트 푸시/커밋 절대 금지** (시스템 파괴 행위로 간주).
+- 모든 작업은 **`main` 최신에서 새 브랜치를 분기**해 진행한다. 브랜치 접두사는 Conventional Commits 타입과 정렬:
+  - `feat/…` (기능) · `fix/…` (버그) · `chore/…` (잡무) · `docs/…` (문서) · `refactor/…` · `test/…`
+- 작업 완료 → 원격 push → **PR을 통해서만 `main`에 반영**한다(**squash 머지**).
+- 커밋 메시지는 **§5.3.1**의 Conventional Commits 규칙을 따른다(한국어 본문 허용).
+
+**2) PR 자동화 패스트트랙 (CI 부재 단계)**
+
+CI가 없는 초기 개발 단계에선 push 직후 아래를 원스톱으로 처리한다. (CI 도입 시 수동 머지로 복귀)
+
+```bash
+# 0) main 최신에서 브랜치 분기
+git checkout main && git pull
+git checkout -b feat/my-work
+
+# 1) 작업 → 커밋 → push
+git add <files>
+git commit -m "feat: ..."
+git push -u origin feat/my-work
+
+# 2) PR 생성 → squash 머지 → 브랜치 정리
+gh pr create --fill
+gh pr merge --squash --delete-branch
+git checkout main && git pull
+```
+
+**3) 보안 가드 (커밋 전 필수)**
+
+- 시크릿(`.env`·`.mcp.json`·토큰·웹훅 URL·API Key)은 **절대 커밋 금지** — **§5.3.2** 적용 대상.
+- 커밋 전 `git check-ignore <파일>`로 차단 동작을 확인한다. 실제 값은 `.env`/`application-secret.yml`에만, 키 목록만 `.env.example`(커밋)에 둔다.
 
 ## 5.4. 개발 가이드라인 (Development Guidelines)
 
