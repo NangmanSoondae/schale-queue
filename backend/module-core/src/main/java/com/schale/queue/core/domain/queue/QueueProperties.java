@@ -43,6 +43,30 @@ public class QueueProperties {
      */
     private int scoreTiebreakDigits = 3;
 
+    /** 대기열 소비(Worker) 파라미터(P-Q4). 입장 처리율을 DB 보호 상한(S3) 이하로 묶는다. */
+    private final Consumer consumer = new Consumer();
+
+    /**
+     * 대기열 소비(dequeue) 파라미터(P-Q4 입장률 throttle).
+     *
+     * <p>{@code rate ≈ batchSize ÷ interval(초)}. 이 값을 DB 보호 상한(NFR S3, 단일노드 200~500 TPS)
+     * <b>이하</b>로 유지해 입장 트래픽을 평탄화한다(docs/9_nfr_and_slo.md S3, docs/11_domain_policy.md P-Q4).
+     * {@code interval} 은 Worker 의 {@code @Scheduled(fixedDelayString)} 가 같은 키로 직접 읽는다.
+     */
+    @Getter
+    @Setter
+    public static class Consumer {
+
+        /** dequeue 주기. 기본 200ms. */
+        private Duration interval = Duration.ofMillis(200);
+
+        /**
+         * 한 tick 에 <b>상품(goodsId)당</b> 꺼내 입장시키는 최대 인원. 기본 50.
+         * (기본값 기준 상품당 ≈ 250 TPS @200ms — 활성 큐가 여럿이면 합산 처리율이 S3 를 넘지 않도록 조정한다.)
+         */
+        private int batchSize = 50;
+    }
+
     /** tie-break 배율 {@code 10^scoreTiebreakDigits}. */
     public long scoreScale() {
         long scale = 1L;

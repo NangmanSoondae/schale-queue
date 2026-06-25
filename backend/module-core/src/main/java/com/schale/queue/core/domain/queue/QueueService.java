@@ -1,9 +1,14 @@
 package com.schale.queue.core.domain.queue;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 /**
@@ -23,12 +28,40 @@ import org.springframework.stereotype.Service;
  * </ul>
  *
  * <p>진입 시각은 주입된 {@link Clock} 에서 얻어 테스트 결정성을 확보한다.
- * 정해진 처리량만큼 앞에서 꺼내 입장시키는 소비(dequeue)는 module-worker 의
- * Consumer 책임이며 본 서비스 범위 밖이다(다음 슬라이스 ③).
+ * 정해진 처리량만큼 앞에서 꺼내 입장시키는 소비({@link #dequeue})는 module-worker 의
+ * Consumer 가 호출하며, 본 서비스는 그 <b>원자적 1회 연산</b>만 제공한다.
  */
 @Service
 @RequiredArgsConstructor
 public class QueueService {
+
+    /**
+     * 대기열 소비를 <b>단일 원자 연산</b>으로 수행하는 Lua 스크립트.
+     *
+     * <p>{@code ZPOPMIN} 으로 score 최솟값(선착순 맨 앞) {@code count} 명을 꺼내고,
+     * 큐가 비면 활성 레지스트리에서 빼고({@code SREM})  시퀀스 카운터까지 정리한다({@code DEL}).
+     * 세 연산을 한 스크립트로 묶어 Redis 단일 스레드에서 불가분하게 실행하므로,
+     * "비었다고 판단 → SREM" 사이에 끼어든 동시 enqueue 가 레지스트리에서 <b>잘못 제거되어
+     * 대기자가 영영 소비되지 않는</b> 경합을 차단한다(enqueue 는 ZADD 뒤 SADD 순서를 지켜 보완).
+     *
+     * <ul>
+     *   <li>KEYS: [1]=대기열 ZSET, [2]=활성 레지스트리 Set, [3]=진입 시퀀스</li>
+     *   <li>ARGV: [1]=최대 인원(count), [2]=goodsId(활성 Set 멤버)</li>
+     *   <li>반환: 꺼낸 memberId 문자열 목록(도착 순서)</li>
+     * </ul>
+     */
+    private static final RedisScript<List> DEQUEUE_SCRIPT = new DefaultRedisScript<>("""
+        local popped = redis.call('ZPOPMIN', KEYS[1], ARGV[1])
+        local members = {}
+        for i = 1, #popped, 2 do
+            members[#members + 1] = popped[i]
+        end
+        if redis.call('ZCARD', KEYS[1]) == 0 then
+            redis.call('SREM', KEYS[2], ARGV[2])
+            redis.call('DEL', KEYS[3])
+        end
+        return members
+        """, List.class);
 
     private final StringRedisTemplate redis;
     private final Clock clock;
@@ -54,6 +87,10 @@ public class QueueService {
             String.valueOf(memberId),
             score
         );
+        // 활성 레지스트리에 등록(Worker 소비 대상 발견용). ZADD 뒤에 SADD 해야
+        // dequeue 의 빈 큐 정리(SREM)와 안전하게 교차한다(위 DEQUEUE_SCRIPT 주석 참조).
+        // 멱등하므로 중복 진입(addIfAbsent=false)이어도 그대로 호출한다.
+        redis.opsForSet().add(QueueKeys.activeGoods(), String.valueOf(goodsId));
         return Boolean.TRUE.equals(added);
     }
 
@@ -71,5 +108,40 @@ public class QueueService {
     public long size(Long goodsId) {
         Long count = redis.opsForZSet().zCard(QueueKeys.waitingQueue(goodsId));
         return count == null ? 0L : count;
+    }
+
+    /**
+     * 대기열 맨 앞에서 최대 {@code count} 명을 <b>원자적으로</b> 꺼낸다(선착순 소비, P-Q4).
+     *
+     * <p>{@link #DEQUEUE_SCRIPT} 로 {@code ZPOPMIN} + 빈 큐 정리(SREM/DEL)를 한 번에 수행한다.
+     * 꺼낸 회원은 더 이상 대기열에 없으므로, 호출 측(Worker)이 곧바로 입장 토큰을 발급한다.
+     *
+     * @param count 이번에 꺼낼 최대 인원(throttle batch). 0 이하면 아무것도 하지 않는다.
+     * @return 꺼낸 memberId 목록(도착 순서). 큐가 비어 있으면 빈 목록.
+     */
+    @SuppressWarnings("unchecked")
+    public List<Long> dequeue(Long goodsId, long count) {
+        if (count <= 0) {
+            return List.of();
+        }
+        List<String> members = redis.execute(
+            DEQUEUE_SCRIPT,
+            List.of(QueueKeys.waitingQueue(goodsId), QueueKeys.activeGoods(), QueueKeys.sequence(goodsId)),
+            String.valueOf(count), String.valueOf(goodsId));
+        if (members == null || members.isEmpty()) {
+            return List.of();
+        }
+        return members.stream().map(Long::valueOf).toList();
+    }
+
+    /**
+     * 대기자가 있는 활성 큐의 goodsId 집합(Worker 소비 대상 발견). 비어 있으면 빈 집합.
+     */
+    public Set<Long> activeGoods() {
+        Set<String> ids = redis.opsForSet().members(QueueKeys.activeGoods());
+        if (ids == null || ids.isEmpty()) {
+            return Set.of();
+        }
+        return ids.stream().map(Long::valueOf).collect(Collectors.toUnmodifiableSet());
     }
 }

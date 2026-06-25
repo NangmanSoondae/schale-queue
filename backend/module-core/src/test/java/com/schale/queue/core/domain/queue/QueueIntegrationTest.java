@@ -64,6 +64,7 @@ class QueueIntegrationTest {
     void cleanup() {
         redis.delete(QueueKeys.waitingQueue(GOODS));
         redis.delete(QueueKeys.sequence(GOODS));
+        redis.opsForSet().remove(QueueKeys.activeGoods(), String.valueOf(GOODS));
         Set<String> admissionKeys = redis.keys("admission:" + GOODS + ":*");
         if (admissionKeys != null && !admissionKeys.isEmpty()) {
             redis.delete(admissionKeys);
@@ -167,6 +168,59 @@ class QueueIntegrationTest {
         assertThat(positions).hasSize(memberCount);
         assertThat(positions).containsExactlyInAnyOrderElementsOf(
             java.util.stream.LongStream.rangeClosed(1, memberCount).boxed().toList());
+    }
+
+    // --- 대기열 소비 (dequeue / 활성 레지스트리) ----------------------------
+
+    @Test
+    @DisplayName("P-Q4: dequeue 는 선착순 맨 앞에서 batch 만큼 꺼내고 큐에서 제거한다")
+    void dequeue_admits_in_fifo_order_and_respects_batch() {
+        // given — 1 → 2 → 3 순서로 진입
+        AdjustableClock clock = new AdjustableClock(Instant.parse("2026-06-24T00:00:00Z"));
+        QueueService queue = new QueueService(redis, clock, new QueueProperties());
+        queue.enqueue(GOODS, 1L);
+        clock.advance(Duration.ofSeconds(1));
+        queue.enqueue(GOODS, 2L);
+        clock.advance(Duration.ofSeconds(1));
+        queue.enqueue(GOODS, 3L);
+
+        // when — 앞에서 2명 소비
+        assertThat(queue.dequeue(GOODS, 2)).containsExactly(1L, 2L);
+
+        // then — 꺼낸 2명은 큐에서 빠지고, 3번이 맨 앞으로
+        assertThat(queue.size(GOODS)).isEqualTo(1L);
+        assertThat(queue.getPosition(GOODS, 1L)).isEmpty();
+        assertThat(queue.getPosition(GOODS, 3L)).hasValue(1L);
+
+        // and — 남은 1명보다 많이 요청해도 있는 만큼만(3번) 반환
+        assertThat(queue.dequeue(GOODS, 5)).containsExactly(3L);
+        assertThat(queue.size(GOODS)).isZero();
+    }
+
+    @Test
+    @DisplayName("활성 레지스트리: enqueue 가 등록하고, 큐가 비면 dequeue 가 레지스트리·시퀀스를 정리한다")
+    void dequeue_cleans_active_registry_and_sequence_when_drained() {
+        // given — 진입하면 활성 큐 목록에 등록된다
+        QueueService queue = new QueueService(redis, Clock.systemUTC(), new QueueProperties());
+        queue.enqueue(GOODS, 1L);
+        assertThat(queue.activeGoods()).contains(GOODS);
+        assertThat(redis.hasKey(QueueKeys.sequence(GOODS))).isTrue();
+
+        // when — 마지막 1명까지 모두 소비
+        assertThat(queue.dequeue(GOODS, 10)).containsExactly(1L);
+
+        // then — 큐가 비었으므로 활성 레지스트리에서 빠지고 시퀀스 카운터도 정리된다
+        assertThat(queue.activeGoods()).doesNotContain(GOODS);
+        assertThat(redis.hasKey(QueueKeys.sequence(GOODS)))
+            .as("빈 큐의 시퀀스 키는 정리되어야 한다").isFalse();
+    }
+
+    @Test
+    @DisplayName("빈 큐 dequeue 는 빈 목록을 반환한다(부작용 없음)")
+    void dequeue_on_empty_queue_returns_empty() {
+        QueueService queue = new QueueService(redis, Clock.systemUTC(), new QueueProperties());
+        assertThat(queue.dequeue(GOODS, 5)).isEmpty();
+        assertThat(queue.activeGoods()).doesNotContain(GOODS);
     }
 
     // --- 입장 토큰 (AdmissionTokenService) ----------------------------------
