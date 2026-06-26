@@ -47,6 +47,20 @@ public class QueueController {
     }
 
     @Operation(
+        summary = "대기 순번 조회",
+        description = "현재 대기 순번과 총 대기 인원을 1회 조회한다(P-Q1, ZRANK O(log N)). 대기 중이 아니면 position=0."
+    )
+    @GetMapping("/{goodsId}/position")
+    public QueuePositionResponse position(
+        @PathVariable Long goodsId,
+        @RequestHeader("X-Member-Id") Long memberId
+    ) {
+        long position = queueService.getPosition(goodsId, memberId).orElse(0L);
+        long waiting = queueService.size(goodsId);
+        return new QueuePositionResponse(position, waiting);
+    }
+
+    @Operation(
         summary = "실시간 대기 상태 구독(SSE)",
         description = "순번 갱신을 'position' 이벤트로 주기 전송하고, 입장 토큰이 발급되면 'admitted' 이벤트를 보낸 뒤 스트림을 종료한다."
     )

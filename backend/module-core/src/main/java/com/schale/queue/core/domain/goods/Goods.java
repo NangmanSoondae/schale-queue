@@ -6,7 +6,6 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
@@ -33,8 +32,9 @@ public class Goods extends BaseTimeEntity {
     @Column(nullable = false)
     private String name;
 
-    @Lob
-    @Column
+    // schema.sql 의 TEXT 컬럼과 정합. @Lob(String→CLOB→tinytext) 는 ddl-auto=validate 에서
+    // 실제 TEXT 컬럼과 타입이 어긋나 부팅을 막으므로, 컬럼 정의를 명시해 일치시킨다(troubleshooting No.05).
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     /** 판매 가격 (KRW, 정수). */
