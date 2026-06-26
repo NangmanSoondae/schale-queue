@@ -37,6 +37,13 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
 
+# 관측성(§9.3.6). 부하 중 JVM 스레드/메모리 계측용으로 metrics 엔드포인트만 노출(로컬 한정).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+
 # 대기열 SSE 스트림 파라미터 (api 전용, QueueSseProperties). 기본값과 동일 — 운영 시 재정의용 노출.
 schale:
   queue:

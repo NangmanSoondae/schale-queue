@@ -57,6 +57,21 @@ UPDATE stock SET remain_quantity = total_quantity;
 SQL
 }
 
+metric() { # $1 = Actuator metric name → VALUE 추출
+  curl -s "$BASE_URL/actuator/metrics/$1" 2>/dev/null | grep -oE '"value":[0-9.eE+]+' | head -1 | cut -d: -f2
+}
+
+sample_metrics() { # $1 = 초, 부하 중 피크 스레드/힙 추적
+  local secs="${1:-40}" peakThreads=0 peakMemMB=0 t m memMB
+  for _ in $(seq 1 "$secs"); do
+    t=$(metric jvm.threads.live); m=$(metric jvm.memory.used)
+    [ -n "$t" ] && t=${t%.*} && [ "$t" -gt "$peakThreads" ] 2>/dev/null && peakThreads=$t
+    if [ -n "$m" ]; then memMB=$(awk "BEGIN{printf \"%d\", $m/1048576}"); [ "$memMB" -gt "$peakMemMB" ] 2>/dev/null && peakMemMB=$memMB; fi
+    sleep 1
+  done
+  echo "[sample] PEAK jvm.threads.live=$peakThreads  jvm.memory.used=${peakMemMB}MB  (peak threads.peak=$(metric jvm.threads.peak | cut -d. -f1))"
+}
+
 oversell_check() {
   local sold remain total
   sold=$(mariadb_exec -N -B -e "SELECT COALESCE(SUM(quantity),0) FROM order_item WHERE goods_id=1001")
@@ -77,6 +92,10 @@ case "$cmd" in
   reset-orders)   reset_orders ;;
   oversell-check) oversell_check ;;
   b1)             k6_run queue.js -e "VUS=${1:-100}" -e "DURATION=${2:-30s}" ;;
+  metrics)        echo "threads.live=$(metric jvm.threads.live) threads.peak=$(metric jvm.threads.peak) mem.used=$(awk "BEGIN{printf \"%dMB\", $(metric jvm.memory.used)/1048576}")" ;;
+  sample)         sample_metrics "${1:-40}" ;;
+  bench-ramp)     k6_run enqueue-ramp.js -e "MAXVUS=${1:-1000}" ;;
+  sse-hold)       k6_run sse-hold.js -e "VUS=${1:-500}" -e "DURATION=${2:-25s}" ;;
   b2)
     n="${2:-1000}"
     reset_orders
