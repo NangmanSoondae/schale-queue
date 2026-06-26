@@ -36,3 +36,10 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+
+# 대기열 SSE 스트림 파라미터 (api 전용, QueueSseProperties). 기본값과 동일 — 운영 시 재정의용 노출.
+schale:
+  queue:
+    sse:
+      poll-interval: ${QUEUE_SSE_POLL_INTERVAL:1s}      # 순번/입장 폴링 주기
+      emitter-timeout: ${QUEUE_SSE_EMITTER_TIMEOUT:30m} # SSE 연결 타임아웃
