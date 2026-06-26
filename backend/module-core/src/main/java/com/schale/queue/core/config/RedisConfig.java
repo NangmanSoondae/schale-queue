@@ -1,9 +1,7 @@
 package com.schale.queue.core.config;
 
 import com.schale.queue.core.domain.queue.QueueProperties;
-import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -21,13 +19,4 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @EnableConfigurationProperties(QueueProperties.class)
 public class RedisConfig {
-
-    /**
-     * 도메인 시간 기준. 대기열 진입 timestamp(P-Q1) 등 시각 의존 로직이 주입받아 사용하며,
-     * 테스트에서 조정 가능한 {@link Clock} 으로 교체해 결정성을 확보한다.
-     */
-    @Bean
-    Clock clock() {
-        return Clock.systemUTC();
-    }
 }

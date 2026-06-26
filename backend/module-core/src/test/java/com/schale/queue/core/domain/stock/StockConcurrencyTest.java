@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,7 +98,8 @@ class StockConcurrencyTest {
                 }
             });
         }
-        latch.await();
+        assertThat(latch.await(10, TimeUnit.SECONDS))
+            .as("100건 차감이 10초 내 끝나야 한다 (실패 시 무한 대기 대신 즉시 실패)").isTrue();
         executor.shutdown();
 
         // then — 잔여 재고 0, 성공 100, 실패 0 (초과 판매 0건)

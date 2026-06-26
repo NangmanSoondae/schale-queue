@@ -39,14 +39,14 @@ public class AdmissionTokenService {
             "1",
             properties.getAdmissionTtl()
         );
-        return Boolean.TRUE.equals(set);
+        return RedisResults.isTrue(set);
     }
 
     /**
      * 유효한 입장 토큰 보유 여부(P-O1 주문 전제). 키가 살아 있으면 {@code true}.
      */
     public boolean hasValidToken(Long goodsId, Long memberId) {
-        return Boolean.TRUE.equals(redis.hasKey(QueueKeys.admission(goodsId, memberId)));
+        return RedisResults.isTrue(redis.hasKey(QueueKeys.admission(goodsId, memberId)));
     }
 
     /**
@@ -55,6 +55,6 @@ public class AdmissionTokenService {
      * @return 실제로 키가 존재해 삭제되었으면 {@code true}
      */
     public boolean revoke(Long goodsId, Long memberId) {
-        return Boolean.TRUE.equals(redis.delete(QueueKeys.admission(goodsId, memberId)));
+        return RedisResults.isTrue(redis.delete(QueueKeys.admission(goodsId, memberId)));
     }
 }
