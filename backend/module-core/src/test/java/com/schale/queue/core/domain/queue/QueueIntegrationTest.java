@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -156,7 +157,8 @@ class QueueIntegrationTest {
                 }
             });
         }
-        latch.await();
+        assertThat(latch.await(10, TimeUnit.SECONDS))
+            .as("100건 진입이 10초 내 끝나야 한다 (실패 시 무한 대기 대신 즉시 실패)").isTrue();
         executor.shutdown();
 
         // then — 정확히 100명, 순번은 1..100 의 빠짐없는 집합(유일성 보장)

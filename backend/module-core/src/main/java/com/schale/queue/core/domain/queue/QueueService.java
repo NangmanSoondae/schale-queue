@@ -91,7 +91,7 @@ public class QueueService {
         // dequeue 의 빈 큐 정리(SREM)와 안전하게 교차한다(위 DEQUEUE_SCRIPT 주석 참조).
         // 멱등하므로 중복 진입(addIfAbsent=false)이어도 그대로 호출한다.
         redis.opsForSet().add(QueueKeys.activeGoods(), String.valueOf(goodsId));
-        return Boolean.TRUE.equals(added);
+        return RedisResults.isTrue(added);
     }
 
     /**

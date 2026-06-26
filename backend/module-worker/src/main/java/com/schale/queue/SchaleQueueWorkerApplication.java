@@ -32,7 +32,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * ({@code @EnableScheduling}) 의 비데몬 스레드가 프로세스를 살아 있게 유지한다.
  *
  * <p>베이스 패키지 {@code com.schale.queue} 하위를 스캔하므로 {@code com.schale.queue.core} 의
- * 대기열 도메인 서비스(QueueService/AdmissionTokenService)·RedisConfig 가 함께 로딩된다.
+ * 대기열 도메인 서비스(QueueService/AdmissionTokenService)·RedisConfig 와, QueueService 가
+ * 주입받는 {@code Clock} 을 제공하는 TimeConfig 가 함께 로딩된다.
  */
 @Configuration
 @EnableAutoConfiguration(exclude = {
