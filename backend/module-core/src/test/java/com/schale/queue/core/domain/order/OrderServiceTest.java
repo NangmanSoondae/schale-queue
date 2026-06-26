@@ -99,9 +99,9 @@ class OrderServiceTest {
         assertThat(created.getOrderStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(created.getTotalAmount()).isEqualTo(expectedTotal);
 
-        // then — 재고 차감이 '주문 저장보다 먼저' 수행되었음을 순서로 검증(원자성 흐름의 전제)
+        // then — 재고 예약이 '주문 저장보다 먼저' 수행되었음을 순서로 검증(원자성 흐름의 전제)
         InOrder inOrder = inOrder(stockService, orderRepository, orderItemRepository, paymentRepository);
-        inOrder.verify(stockService).decrease(goodsId, quantity);
+        inOrder.verify(stockService).reserve(goodsId, quantity);
         inOrder.verify(orderRepository).save(any(Order.class));
         inOrder.verify(orderItemRepository).save(any(OrderItem.class));
         inOrder.verify(paymentRepository).save(any(Payment.class));
@@ -144,7 +144,7 @@ class OrderServiceTest {
         // when & then — 한도 초과 예외, 재고는 손대지 않는다(fail-fast)
         assertThatThrownBy(() -> orderService.createOrder(1L, goodsId, 3))
             .isInstanceOf(PurchaseLimitExceededException.class);
-        then(stockService).should(never()).decrease(anyLong(), anyInt());
+        then(stockService).should(never()).reserve(anyLong(), anyInt());
         then(orderRepository).should(never()).save(any(Order.class));
     }
 }

@@ -60,20 +60,24 @@ CREATE TABLE goods (
   COMMENT = '상품';
 
 -- ----------------------------------------------------------------------------
---  stock : 재고 (쓰기 경합 집중 → goods 와 1:1 분리)
---  remain_quantity 는 CHECK 로 음수(초과판매) 방지 — DB 차원의 최후 안전망
+--  stock : 재고 — 예약 기반 3-카운터 모델 (ADR-004, P-S2)
+--  total(불변 앵커) = available + reserved + sold (합계 불변식, CHECK 로 자가검증)
+--  available >= 0 으로 오버셀 방지 — DB 차원의 최후 안전망(P-S1)
 -- ----------------------------------------------------------------------------
 CREATE TABLE stock (
-    id              BIGINT NOT NULL AUTO_INCREMENT COMMENT 'PK',
-    goods_id        BIGINT NOT NULL                COMMENT '상품 FK (1:1)',
-    total_quantity  INT    NOT NULL                COMMENT '총 재고 수량',
-    remain_quantity INT    NOT NULL                COMMENT '잔여 재고 수량',
-    created_at      DATETIME NOT NULL              COMMENT '생성 일시',
-    updated_at      DATETIME NOT NULL              COMMENT '수정 일시',
+    id                 BIGINT NOT NULL AUTO_INCREMENT COMMENT 'PK',
+    goods_id           BIGINT NOT NULL                COMMENT '상품 FK (1:1)',
+    total_quantity     INT    NOT NULL                COMMENT '총 재고(불변 앵커)',
+    available_quantity INT    NOT NULL                COMMENT '가용 수량(아무도 안 잡음)',
+    reserved_quantity  INT    NOT NULL DEFAULT 0      COMMENT '예약(결제 전 보류) 수량',
+    sold_quantity      INT    NOT NULL DEFAULT 0      COMMENT '판매 확정 수량',
+    created_at         DATETIME NOT NULL              COMMENT '생성 일시',
+    updated_at         DATETIME NOT NULL              COMMENT '수정 일시',
     PRIMARY KEY (id),
     UNIQUE KEY uk_stock_goods_id (goods_id),  -- 1:1 보장
     CONSTRAINT fk_stock_goods FOREIGN KEY (goods_id) REFERENCES goods (id),
-    CONSTRAINT chk_stock_remain_non_negative CHECK (remain_quantity >= 0)
+    CONSTRAINT chk_stock_available_non_negative CHECK (available_quantity >= 0),
+    CONSTRAINT chk_stock_sum_invariant CHECK (total_quantity = available_quantity + reserved_quantity + sold_quantity)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
