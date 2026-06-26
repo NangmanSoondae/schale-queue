@@ -1,6 +1,7 @@
 package com.schale.queue.api.common;
 
 import com.schale.queue.api.order.AdmissionRequiredException;
+import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -36,6 +37,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConflict(IllegalStateException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(ErrorResponse.of("STOCK_CONFLICT", e.getMessage()));
+    }
+
+    /** 1인 구매 한도 초과 또는 활성 주문 중복(P-O3). */
+    @ExceptionHandler(PurchaseLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handlePurchaseLimit(PurchaseLimitExceededException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse.of("PURCHASE_LIMIT_EXCEEDED", e.getMessage()));
     }
 
     /** 존재하지 않는 상품/재고 등 잘못된 인자. */

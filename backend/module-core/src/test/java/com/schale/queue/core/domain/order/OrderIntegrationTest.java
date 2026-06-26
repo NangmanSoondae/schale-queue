@@ -13,6 +13,7 @@ import com.schale.queue.core.domain.member.Role;
 import com.schale.queue.core.domain.member.repository.MemberRepository;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
+import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
 import com.schale.queue.core.domain.payment.Payment;
 import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
@@ -69,6 +70,9 @@ class OrderIntegrationTest {
     @Autowired
     private OrderItemRepository orderItemRepository;
 
+    @Autowired
+    private PurchaseSlotRepository purchaseSlotRepository;
+
     // 결제 저장만 강제로 실패시키기 위한 스파이. 나머지 동작은 실제 빈과 동일하다.
     @MockitoSpyBean
     private PaymentRepository paymentRepository;
@@ -112,6 +116,8 @@ class OrderIntegrationTest {
     }
 
     private void cleanUp() {
+        // FK 의존성 역순: purchase_slot(→member/goods/orders) 을 먼저 비운다.
+        purchaseSlotRepository.deleteAll();
         paymentRepository.deleteAll();
         orderItemRepository.deleteAll();
         orderRepository.deleteAll();

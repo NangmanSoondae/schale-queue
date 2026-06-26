@@ -45,11 +45,19 @@ public class Goods extends BaseTimeEntity {
     @Column(name = "open_at", nullable = false)
     private LocalDateTime openAt;
 
+    /**
+     * 1인 구매 한도(P-O3). 회원의 해당 상품 활성(예약+확정) 수량이 이 값을 넘을 수 없다.
+     * {@code null} 이면 무제한, 기본 1. "변경 적은 설정 메타정보"라 Stock 이 아닌 Goods 에 둔다(ADR-001 §2).
+     */
+    @Column(name = "max_purchase_per_member")
+    private Integer maxPurchasePerMember;
+
     @Builder
-    private Goods(String name, String description, Long price, LocalDateTime openAt) {
+    private Goods(String name, String description, Long price, LocalDateTime openAt, Integer maxPurchasePerMember) {
         this.name = name;
         this.description = description;
         this.price = price;
         this.openAt = openAt;
+        this.maxPurchasePerMember = maxPurchasePerMember;
     }
 }

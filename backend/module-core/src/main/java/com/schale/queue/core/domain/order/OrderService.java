@@ -4,6 +4,7 @@ import com.schale.queue.core.domain.goods.Goods;
 import com.schale.queue.core.domain.goods.repository.GoodsRepository;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
+import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
 import com.schale.queue.core.domain.payment.Payment;
 import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
@@ -11,6 +12,7 @@ import com.schale.queue.core.domain.stock.StockService;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +47,7 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final PaymentRepository paymentRepository;
+    private final PurchaseSlotRepository purchaseSlotRepository;
 
     /**
      * 단일 상품 주문을 생성한다. 재고 차감 → 주문/항목/결제 생성을 하나의 트랜잭션으로 묶는다.
@@ -58,28 +61,37 @@ public class OrderService {
      * @param goodsId  주문 상품 ID
      * @param quantity 주문 수량(양수)
      * @return 생성된 주문(PENDING)
-     * @throws IllegalArgumentException 재고 또는 상품이 존재하지 않는 경우
-     * @throws IllegalStateException    잔여 재고가 부족한 경우(초과 판매 방지)
+     * @throws IllegalArgumentException        재고 또는 상품이 존재하지 않는 경우
+     * @throws IllegalStateException           잔여 재고가 부족한 경우(초과 판매 방지)
+     * @throws PurchaseLimitExceededException   1인 구매 한도(P-O3)를 초과하거나 활성 주문이 이미 있는 경우
      */
     @Transactional
     public Order createOrder(Long memberId, Long goodsId, int quantity) {
-        // ① 재고를 먼저 차감한다. 같은 트랜잭션에 병합되어, 이후 단계 실패 시 함께 롤백된다.
-        stockService.decrease(goodsId, quantity);
-
-        // ② 주문 시점의 단가 스냅샷을 확보한다.
+        // ① 상품 조회(단가 스냅샷 + 1인 한도 설정).
         Goods goods = goodsRepository.findById(goodsId)
             .orElseThrow(() -> new IllegalArgumentException("상품이 존재하지 않습니다. goodsId=" + goodsId));
+
+        // ② 1인 구매 한도 수량 검사(P-O3). null=무제한. 재고 차감 전에 빠르게 거른다.
+        Integer maxPerMember = goods.getMaxPurchasePerMember();
+        if (maxPerMember != null && quantity > maxPerMember) {
+            throw new PurchaseLimitExceededException(
+                "1인 구매 한도를 초과했습니다. 한도=" + maxPerMember + ", 요청 수량=" + quantity);
+        }
+
+        // ③ 재고를 차감한다. 같은 트랜잭션에 병합되어, 이후 단계 실패 시 함께 롤백된다.
+        stockService.decrease(goodsId, quantity);
+
         long unitPrice = goods.getPrice();
         long totalAmount = unitPrice * quantity;
 
-        // ③ 주문(확정된 사실)을 PENDING 으로 저장한다.
+        // ④ 주문(확정된 사실)을 PENDING 으로 저장한다.
         Order order = orderRepository.save(Order.builder()
             .memberId(memberId)
             .orderStatus(OrderStatus.PENDING)
             .totalAmount(totalAmount)
             .build());
 
-        // ④ 주문 항목을 단가 스냅샷과 함께 저장한다.
+        // ⑤ 주문 항목을 단가 스냅샷과 함께 저장한다.
         orderItemRepository.save(OrderItem.builder()
             .orderId(order.getId())
             .goodsId(goodsId)
@@ -87,13 +99,26 @@ public class OrderService {
             .orderPrice(unitPrice)
             .build());
 
-        // ⑤ 결제를 READY + 만료 시각과 함께 생성한다(결제 도메인 분리, ADR-001).
+        // ⑥ 결제를 READY + 만료 시각과 함께 생성한다(결제 도메인 분리, ADR-001).
         paymentRepository.save(Payment.builder()
             .orderId(order.getId())
             .amount(totalAmount)
             .status(PaymentStatus.READY)
             .timeoutAt(LocalDateTime.now().plus(PAYMENT_TIMEOUT))
             .build());
+
+        // ⑦ 활성 구매 슬롯을 점유한다(P-O3 동시성). (member, goods) 유니크 제약이 같은 회원의 동시
+        //    중복 주문을 DB 차원에서 원자적으로 차단한다. 충돌 시 트랜잭션 전체가 롤백돼 재고가 복구된다.
+        try {
+            purchaseSlotRepository.saveAndFlush(PurchaseSlot.builder()
+                .memberId(memberId)
+                .goodsId(goodsId)
+                .orderId(order.getId())
+                .build());
+        } catch (DataIntegrityViolationException e) {
+            throw new PurchaseLimitExceededException(
+                "이미 진행 중인 주문이 있습니다(1인 1주문). memberId=" + memberId + ", goodsId=" + goodsId);
+        }
 
         return order;
     }
