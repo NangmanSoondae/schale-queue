@@ -177,25 +177,30 @@
 - 작업 완료 → 원격 push → **PR을 통해서만 `main`에 반영**한다(**squash 머지**).
 - 커밋 메시지는 **§5.3.1**의 Conventional Commits 규칙을 따른다(한국어 본문 허용).
 
-**2) PR 자동화 패스트트랙 (CI 부재 단계)**
+**2) PR 머지 프로토콜 (CI 게이트 · 2026-06-26 전환)**
 
-CI가 없는 초기 개발 단계에선 push 직후 아래를 원스톱으로 처리한다. (CI 도입 시 수동 머지로 복귀)
+> ✅ **CI 도입 완료(`.github/workflows/ci.yml`, 2026-06-26).** 기존 **무검증 패스트트랙**(push 직후 즉시 머지)은 **폐기**한다. 이제 모든 PR은 **CI(빌드 + 전체 테스트) 그린을 확인한 뒤에만** 머지한다.
 
 ```bash
 # 0) main 최신에서 브랜치 분기
 git checkout main && git pull
 git checkout -b feat/my-work
 
-# 1) 작업 → 커밋 → push
+# 1) 작업 → 커밋 → push (Conventional Commits, §5.3.1)
 git add <files>
 git commit -m "feat: ..."
 git push -u origin feat/my-work
 
-# 2) PR 생성 → squash 머지 → 브랜치 정리
+# 2) PR 생성 → CI 통과 대기 → 그린일 때만 squash 머지 → 정리
 gh pr create --fill
+gh pr checks --watch        # CI 그린까지 대기. 레드면 머지 금지.
 gh pr merge --squash --delete-branch
 git checkout main && git pull
 ```
+
+- **자율 진행 + CI 게이트**: 사용자에게 머지 승인을 따로 묻지 않되, **CI 그린이 곧 머지 게이트**다(사람 승인을 CI 검증으로 대체).
+- ⛔ **CI 레드 = 머지 금지.** `gh pr checks --watch` 가 실패를 보고하면 머지하지 않고 **원인을 고쳐 재푸시**한 뒤 다시 그린을 확인한다.
+- ⚠️ **branch protection/rulesets**: GitHub 무료 플랜 + 비공개 레포면 서버측 강제가 **403** 으로 막힐 수 있다. 그 경우 본 프로토콜(`gh pr checks --watch`)이 **유일한 CI 게이트**이므로 반드시 준수한다.
 
 **3) 보안 가드 (커밋 전 필수)**
 
