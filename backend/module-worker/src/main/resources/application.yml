@@ -4,10 +4,9 @@
 #  [보안 원칙 — docs/5_code_of_conduct.md §5.3.2]
 #   · 이 파일에는 '구조와 플레이스홀더'만 둔다. 실제 민감 값은 절대 작성하지 않는다.
 #
-#  워커는 웹 계층이 없는 백그라운드 모듈이며(web-application-type=none),
-#  대기열 소비에 Redis 만 사용한다. DB(JPA/DataSource)는 자동 구성에서 제외하므로
-#  (SchaleQueueWorkerApplication 참조) MariaDB 접속 정보가 필요 없다.
-#  → DB 를 쓰는 워커(주문/정산)가 추가되는 슬라이스에서 datasource 설정을 되살린다.
+#  워커는 웹 계층이 없는 백그라운드 모듈이다(web-application-type=none).
+#  대기열 소비(Redis)에 더해, 결제 만료 정리(UC-07)가 DB(JPA)를 쓰므로 datasource 를 되살렸다
+#  (2026-06-26, SchaleQueueWorkerApplication 참조). 민감 값은 .env / 환경변수로 주입.
 # ============================================================================
 spring:
   application:
@@ -29,9 +28,23 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # 결제 만료 정리(UC-07)용 DB. api 와 동일 스키마에 접속한다(민감 값은 외부 주입).
+  datasource:
+    url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
+    username: ${DB_USERNAME:schale}
+    password: ${DB_PASSWORD}            # 기본값 없음 → 반드시 외부 주입 (.env / secret)
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate                # 스키마는 schema.sql 관리, 엔티티-스키마 검증만
+    open-in-view: false
+
 # 대기열 소비(P-Q4 입장률 throttle) — rate ≈ batch-size ÷ interval 을 DB 보호 상한(S3) 이하로 유지
 schale:
   queue:
     consumer:
       interval: 200ms       # dequeue 주기 (@Scheduled fixedDelay)
       batch-size: 50        # tick·상품당 최대 입장 인원 (기본값 ≈ 상품당 250 TPS)
+  payment:
+    expiry-interval: 10s    # 결제 만료 정리 주기 (@Scheduled fixedDelay, UC-07)
