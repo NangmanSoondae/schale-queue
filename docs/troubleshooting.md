@@ -183,3 +183,40 @@ org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation:
 
 ### 5) 결과 (Result)
 `module-api` 가 실제 MariaDB 에 정상 부팅됐고 부하테스트를 진행할 수 있게 됐다. 교훈: **통합테스트가 전체 부팅 경로(JPA 컨텍스트 + validate)를 거치지 않으면 엔티티↔DDL 불일치가 잠복**한다. 첫 실 DB 부팅은 그 자체로 의미 있는 검증 지점이며, 부하테스트 준비가 이를 앞당겨 드러냈다.
+
+
+---
+
+## [No.06] module-worker 가 부팅조차 못 함 (① JPA 결합 빈 스캔 ② VT 데몬 스레드로 즉시 종료)
+
+- **일자**: 2026-06-26
+- **관련 Phase**: Phase 3 (부하 측정 ⑦ — 입장률 S3 측정 위해 워커 첫 실기동)
+- **태그**: `#Spring` `#ComponentScan` `#VirtualThreads` `#daemon` `#Worker`
+
+### 1) 발견 (Discovery)
+B3 입장률(S3) 측정을 위해 `module-worker` 를 처음으로 실제 기동하자 두 단계로 실패했다.
+
+```log
+# ① 컨텍스트 생성 실패
+UnsatisfiedDependencyException: ... 'orderService' → 'stockService' →
+ No qualifying bean of type 'StockRepository' available
+# ②(①수정 후) 시작하자마자 종료
+Started SchaleQueueWorkerApplication in 0.949 seconds ... BUILD SUCCESSFUL  (JVM 종료)
+```
+
+그간 워커는 `QueueConsumerTest`(Mockito 단위)로만 검증됐고 **전체 컨텍스트로 부팅된 적이 없어** 두 결함이 잠복해 있었다.
+
+### 2) 분석 (Analysis)
+- **①** 워커는 Redis 전용이라 DataSource/JPA 자동구성을 제외(ADR-002 §3.3)하는데, `@ComponentScan("com.schale.queue")` 가 core 의 JPA 결합 `@Service`(OrderService→StockService→StockRepository)까지 스캔해 빈 생성을 시도 → JPA 리포지토리 빈이 없어 컨텍스트가 깨졌다.
+- **②** 워커에 `spring.threads.virtual.enabled=true` 가 켜져 있어 `@Scheduled` 스케줄러가 **가상 스레드(데몬)** 를 쓴다. 웹 서버(비데몬)도 없으니 `main` 반환 후 **데몬 스레드만 남아 JVM 이 즉시 종료**됐다. yml 주석의 "비데몬 스레드가 프로세스를 유지"는 VT 도입으로 깨진 가정이었다.
+
+### 3) 고찰 (Contemplation)
+- ① **JPA 를 켠다**(워커에 DB 부여) → "Redis 전용 워커" 설계(부팅 가속·장애 격리) 포기. 기각. **스캔에서 JPA 도메인 제외**(채택) → 설계 의도와 정합, 결제/정산 워커 슬라이스에서 JPA 와 함께 되살리면 됨.
+- ② **VT 끄기** → 프로젝트 전략 훼손. **scheduler 스레드를 비데몬으로** → 커스터마이징 부담. **`spring.main.keep-alive=true`**(채택, Boot 3.2+) → 비웹 앱을 살리는 표준 수단, 한 줄.
+
+### 4) 해결 (Resolution)
+- ①: `@ComponentScan` 에 REGEX 제외 추가 — `core.domain.(order|stock|payment|goods|member)` 패키지 스캔 제외.
+- ②: worker `application.yml` 에 `spring.main.keep-alive: true` 추가.
+
+### 5) 결과 (Result)
+워커가 정상 부팅·상주하며 대기열을 소비했고, **입장률 ≈ 269 issues/s**(batch 50 / 200ms = 250/s 설계값, 목표 200~500 TPS 내)를 실측했다. 교훈: **단위 테스트만 있고 전체 컨텍스트 부팅을 한 번도 안 거친 모듈은 통합 결함이 잠복**한다. 부하 측정이 그 첫 부팅을 강제해 두 결함을 동시에 드러냈다(스키마 No.05 와 같은 교훈).

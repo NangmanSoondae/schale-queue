@@ -57,6 +57,24 @@ UPDATE stock SET available_quantity = total_quantity, reserved_quantity = 0, sol
 SQL
 }
 
+qsize() { docker exec -i "$REDIS_C" redis-cli ZCARD queue:1002 2>/dev/null | tr -d '\r'; }
+
+drain_rate() { # B3 입장률(S3): 백로그 적재 후 워커 소비 속도 측정. 워커가 떠 있어야 한다.
+  local n="${1:-3000}" secs="${2:-20}" start cur prev i drained elapsed
+  # 백로그 적재(member=숫자여야 워커 Long 파싱 성공) + 활성 레지스트리 등록
+  seq 1 "$n" | sed 's#.*#ZADD queue:1002 & &#' | docker exec -i "$REDIS_C" redis-cli --pipe >/dev/null
+  docker exec -i "$REDIS_C" redis-cli SADD queue:active 1002 >/dev/null
+  start=$(qsize); prev=$start
+  echo "[drain-rate] 백로그 적재 queue:1002=$start, 워커 소비 측정 최대 ${secs}s…"
+  for i in $(seq 1 "$secs"); do
+    sleep 1; cur=$(qsize)
+    echo "  t=${i}s queue=$cur drained=$((prev - cur))/s"; prev=$cur
+    [ "${cur:-0}" -le 0 ] && break
+  done
+  drained=$((start - cur)); elapsed=$i
+  echo "[drain-rate] 총 $drained 건 / ${elapsed}s = 평균 $((drained / elapsed)) issues/s (S3 입장 처리율)"
+}
+
 metric() { # $1 = Actuator metric name → VALUE 추출
   curl -s "$BASE_URL/actuator/metrics/$1" 2>/dev/null | grep -oE '"value":[0-9.eE+]+' | head -1 | cut -d: -f2
 }
@@ -100,6 +118,9 @@ case "$cmd" in
   sample)         sample_metrics "${1:-40}" ;;
   bench-ramp)     k6_run enqueue-ramp.js -e "MAXVUS=${1:-1000}" ;;
   sse-hold)       k6_run sse-hold.js -e "VUS=${1:-500}" -e "DURATION=${2:-25s}" ;;
+  spike)          k6_run spike.js -e "MAXVUS=${1:-1000}" ;;
+  bench-slow)     k6_run bench-slow.js -e "MAXVUS=${1:-1000}" -e "SLOW_MS=${2:-100}" ;;
+  drain-rate)     drain_rate "${1:-3000}" "${2:-20}" ;;
   b2)
     n="${2:-1000}"
     reset_orders

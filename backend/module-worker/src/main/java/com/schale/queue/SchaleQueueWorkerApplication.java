@@ -43,7 +43,15 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 })
 @ComponentScan(
     basePackages = "com.schale.queue",
-    excludeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JpaAuditingConfig.class))
+    excludeFilters = {
+        @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JpaAuditingConfig.class),
+        // 현 워커는 Redis 전용(대기열 소비)이라 JPA 를 끈다(ADR-002 §3.3). 그런데 core 의 JPA 결합
+        // 도메인 서비스(OrderService→StockService→StockRepository 등)까지 스캔하면 JPA 리포지토리
+        // 빈이 없어 컨텍스트가 깨진다. 주문/재고/결제/상품/회원 도메인을 스캔에서 제외한다.
+        // (DB 를 쓰는 워커 — 결제 만료 release 등 — 가 생기면 그 슬라이스에서 JPA 와 함께 되살린다.)
+        @Filter(type = FilterType.REGEX,
+            pattern = "com\\.schale\\.queue\\.core\\.domain\\.(order|stock|payment|goods|member)\\..*")
+    })
 @EnableScheduling
 public class SchaleQueueWorkerApplication {
 
