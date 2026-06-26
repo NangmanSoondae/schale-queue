@@ -146,3 +146,40 @@ CLI(`docker compose up`, `docker info`)는 정상 동작하는데 Testcontainers
 
 ### 5) 결과 (Result)
 **응답 코드 `204`(성공)** 로 알림이 정상 전송됐다. 한글·이모지가 깨지지 않고 채널에 표시됐다. 교훈: Git Bash에서 멀티바이트 본문을 외부 프로세스에 넘길 때는 인라인 문자열 대신 **UTF-8 파일 + `--data-binary @file`** 을 기본 패턴으로 삼는다. (이 원칙은 향후 `notify-gateway` 전환 시에도 페이로드 전달에 동일 적용 가능)
+
+---
+
+## [No.05] 앱 첫 실제 부팅에서 `Schema-validation: wrong column type` 으로 기동 실패 (goods.description)
+
+- **일자**: 2026-06-26
+- **관련 Phase**: Phase 3 (슬라이스 ⑥ 부하테스트 준비 — module-api 첫 실 DB 부팅)
+- **태그**: `#JPA` `#Hibernate` `#스키마검증` `#MariaDB` `#ddl-auto`
+
+### 1) 발견 (Discovery)
+부하테스트를 위해 `module-api` 를 실제 MariaDB 에 처음으로 `bootRun` 하자 컨텍스트 초기화 중 기동이 실패했다.
+
+```log
+org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation:
+ wrong column type encountered in column [description] in table [goods];
+ found [text (Types#LONGVARCHAR)], but expecting [tinytext (Types#CLOB)]
+```
+
+그간 통합테스트는 `LettuceConnectionFactory`/`docker-compose` 직접 접속으로 **JPA 컨텍스트를 띄우지 않거나**(대기열 IT) DataSource 만 썼기에, 엔티티↔스키마 정합이 전체 부팅 경로에서 검증된 적이 없어 잠복해 있었다.
+
+### 2) 분석 (Analysis)
+- `Goods.description` 은 `@Lob @Column String` 으로 매핑돼 있었다. Hibernate(MariaDB 방언)는 `@Lob`+String 을 **CLOB → `tinytext`** 로 기대한다.
+- 그러나 `schema.sql` 의 실제 컬럼은 `TEXT` 다. `spring.jpa.hibernate.ddl-auto=validate` 가 이 타입 불일치를 잡아 부팅을 중단시켰다.
+- 즉 **DDL(TEXT)과 엔티티 매핑(@Lob→tinytext)의 의도가 어긋난** 것이며, validate 가 의도대로 "조용한 불일치"를 부팅 실패로 드러낸 정상 동작이다.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — `ddl-auto` 를 none 으로 완화**: 검증을 끄면 증상은 사라지나 근본 불일치를 덮어 더 위험(런타임에 엉뚱한 타입). 기각.
+- **방안 B — schema.sql 을 `TINYTEXT` 로 변경**: 엔티티(@Lob)에 맞추는 방향이나, 설명 컬럼을 255바이트로 좁혀 도메인 의도(긴 설명)를 훼손. 기각.
+- **방안 C — 엔티티를 DDL(TEXT)에 맞춤(채택)**: `@Lob` 제거 후 `@Column(columnDefinition = "TEXT")` 로 명시. 의도된 스키마(TEXT)와 엔티티가 일치하고 validate 통과. 가장 정합적.
+
+### 4) 해결 (Resolution)
+방안 C를 채택했다.
+- `Goods.description`: `@Lob @Column` → `@Column(columnDefinition = "TEXT")`, `jakarta.persistence.Lob` import 제거.
+- 부하테스트 슬라이스(⑥) 진행 중 발견된 블로커라 같은 작업에서 함께 수정했다.
+
+### 5) 결과 (Result)
+`module-api` 가 실제 MariaDB 에 정상 부팅됐고 부하테스트를 진행할 수 있게 됐다. 교훈: **통합테스트가 전체 부팅 경로(JPA 컨텍스트 + validate)를 거치지 않으면 엔티티↔DDL 불일치가 잠복**한다. 첫 실 DB 부팅은 그 자체로 의미 있는 검증 지점이며, 부하테스트 준비가 이를 앞당겨 드러냈다.

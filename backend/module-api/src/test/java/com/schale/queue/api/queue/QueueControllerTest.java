@@ -62,6 +62,33 @@ class QueueControllerTest {
     }
 
     @Test
+    @DisplayName("순번 조회는 200 과 현재 순번/대기 인원을 반환한다")
+    void position_returns_200_with_rank() throws Exception {
+        // given
+        given(queueService.getPosition(1L, 42L)).willReturn(OptionalLong.of(7));
+        given(queueService.size(1L)).willReturn(99L);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/queue/1/position").header(MEMBER_HEADER, 42L))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.position").value(7))
+            .andExpect(jsonPath("$.waiting").value(99));
+    }
+
+    @Test
+    @DisplayName("대기 중이 아니면 순번 조회는 position=0 을 반환한다")
+    void position_returns_zero_when_not_waiting() throws Exception {
+        // given — 큐에 없음
+        given(queueService.getPosition(1L, 42L)).willReturn(OptionalLong.empty());
+        given(queueService.size(1L)).willReturn(0L);
+
+        // when & then
+        mockMvc.perform(get("/api/v1/queue/1/position").header(MEMBER_HEADER, 42L))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.position").value(0));
+    }
+
+    @Test
     @DisplayName("SSE 구독은 비동기 스트림을 시작하고 스트림 서비스에 위임한다")
     void subscribe_starts_async_stream() throws Exception {
         // given — 스트림 서비스가 열린 emitter 를 반환
