@@ -106,7 +106,7 @@ class OrderIntegrationTest {
         stockRepository.save(Stock.builder()
             .goodsId(goodsId)
             .totalQuantity(INITIAL_STOCK)
-            .remainQuantity(INITIAL_STOCK)
+            .availableQuantity(INITIAL_STOCK)
             .build());
     }
 
@@ -159,9 +159,11 @@ class OrderIntegrationTest {
             .as("결제 만료 시각은 주문 시점 이후의 미래여야 한다")
             .isAfter(before);
 
-        // then — 재고: 정확히 3개 차감
+        // then — 재고: 정확히 3개 예약(available-- reserved++), 합계 불변식 성립
         Stock stock = stockRepository.findByGoodsId(goodsId).orElseThrow();
-        assertThat(stock.getRemainQuantity()).isEqualTo(INITIAL_STOCK - quantity);
+        assertThat(stock.getAvailableQuantity()).isEqualTo(INITIAL_STOCK - quantity);
+        assertThat(stock.getReservedQuantity()).isEqualTo(quantity);
+        assertThat(stock.getSoldQuantity()).isZero();
     }
 
     @Test
@@ -177,11 +179,12 @@ class OrderIntegrationTest {
             .isInstanceOf(RuntimeException.class)
             .hasMessageContaining("결제 저장 실패");
 
-        // then — 같은 트랜잭션이 롤백되어 재고가 차감 전(100)으로 원상 복구
+        // then — 같은 트랜잭션이 롤백되어 재고가 예약 전(가용 100, 예약 0)으로 원상 복구
         Stock stock = stockRepository.findByGoodsId(goodsId).orElseThrow();
-        assertThat(stock.getRemainQuantity())
-            .as("결제 실패로 트랜잭션이 롤백되었으므로 재고는 차감되지 않아야 한다")
+        assertThat(stock.getAvailableQuantity())
+            .as("결제 실패로 트랜잭션이 롤백되었으므로 재고는 예약되지 않아야 한다")
             .isEqualTo(INITIAL_STOCK);
+        assertThat(stock.getReservedQuantity()).as("예약도 롤백되어 0").isZero();
 
         // then — 주문/항목도 함께 롤백되어 흔적이 남지 않음 (운명 공동체)
         assertThat(orderRepository.findByMemberId(memberId))

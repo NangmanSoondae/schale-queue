@@ -20,9 +20,10 @@ INSERT INTO goods (id, name, description, price, open_at, created_at, updated_at
     (1001, '부하-배송형(B2 오버셀)', NULL, 49000, NOW(), NOW(), NOW()),
     (1002, '부하-예매형(B1 지연)',  NULL, 49000, NOW(), NOW(), NOW());
 
-INSERT INTO stock (goods_id, total_quantity, remain_quantity, created_at, updated_at) VALUES
-    (1001, 10,   10,   NOW(), NOW()),
-    (1002, 5000, 5000, NOW(), NOW());
+-- 예약 모델(P-S2): available=total, reserved=0, sold=0 으로 시드
+INSERT INTO stock (goods_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, created_at, updated_at) VALUES
+    (1001, 10,   10,   0, 0, NOW(), NOW()),
+    (1002, 5000, 5000, 0, 0, NOW(), NOW());
 
 -- 회원 1..1000 (B2 경합비 100:1 @ stock 10). 더 큰 경합이 필요하면 seq_1_to_N 의 N 을 키운다.
 INSERT INTO member (id, email, password, name, role, created_at, updated_at)

@@ -52,7 +52,7 @@ public class OrderService {
     /**
      * 단일 상품 주문을 생성한다. 재고 차감 → 주문/항목/결제 생성을 하나의 트랜잭션으로 묶는다.
      *
-     * <p>흐름: ① 재고를 먼저 안전하게 차감({@code StockService.decrease}, 비관적 락) →
+     * <p>흐름: ① 재고를 먼저 안전하게 예약({@code StockService.reserve}, 비관적 락, P-S2) →
      * ② 가격 스냅샷을 위해 상품 조회 → ③ {@code Order(PENDING)} 저장 →
      * ④ {@code OrderItem} 저장 → ⑤ {@code Payment(READY, timeoutAt=now+5m)} 저장.
      * 어느 단계든 예외가 발생하면 트랜잭션 전체가 롤백되어 재고가 원상 복구된다.
@@ -78,8 +78,8 @@ public class OrderService {
                 "1인 구매 한도를 초과했습니다. 한도=" + maxPerMember + ", 요청 수량=" + quantity);
         }
 
-        // ③ 재고를 차감한다. 같은 트랜잭션에 병합되어, 이후 단계 실패 시 함께 롤백된다.
-        stockService.decrease(goodsId, quantity);
+        // ③ 재고를 예약한다(P-S2: available-- reserved++). 같은 트랜잭션에 병합되어, 이후 단계 실패 시 함께 롤백된다.
+        stockService.reserve(goodsId, quantity);
 
         long unitPrice = goods.getPrice();
         long totalAmount = unitPrice * quantity;

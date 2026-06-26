@@ -65,7 +65,7 @@ class StockConcurrencyTest {
         stockRepository.save(Stock.builder()
             .goodsId(goodsId)
             .totalQuantity(100)
-            .remainQuantity(100)
+            .availableQuantity(100)
             .build());
     }
 
@@ -76,20 +76,20 @@ class StockConcurrencyTest {
     }
 
     @Test
-    @DisplayName("100개의 가상 스레드가 동시에 1개씩 차감해도 초과 판매 없이 정확히 0개가 남는다")
-    void concurrent_decrease_does_not_oversell() throws InterruptedException {
-        // given — 재고 100개, 100개의 동시 차감 요청
+    @DisplayName("100개의 가상 스레드가 동시에 1개씩 예약해도 초과 판매 없이 가용 0·예약 100, 합계 불변식 성립")
+    void concurrent_reserve_does_not_oversell() throws InterruptedException {
+        // given — 재고 100개, 100개의 동시 예약 요청
         int threadCount = 100;
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         CountDownLatch latch = new CountDownLatch(threadCount);
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger failureCount = new AtomicInteger();
 
-        // when — 100개 가상 스레드가 동시에 재고 1개씩 차감
+        // when — 100개 가상 스레드가 동시에 재고 1개씩 예약(P-S2: available-- reserved++)
         for (int i = 0; i < threadCount; i++) {
             executor.submit(() -> {
                 try {
-                    stockService.decrease(goodsId, 1);
+                    stockService.reserve(goodsId, 1);
                     successCount.incrementAndGet();
                 } catch (Exception e) {
                     failureCount.incrementAndGet();
@@ -99,15 +99,18 @@ class StockConcurrencyTest {
             });
         }
         assertThat(latch.await(10, TimeUnit.SECONDS))
-            .as("100건 차감이 10초 내 끝나야 한다 (실패 시 무한 대기 대신 즉시 실패)").isTrue();
+            .as("100건 예약이 10초 내 끝나야 한다 (실패 시 무한 대기 대신 즉시 실패)").isTrue();
         executor.shutdown();
 
-        // then — 잔여 재고 0, 성공 100, 실패 0 (초과 판매 0건)
+        // then — 가용 0, 예약 100, 판매 0, 합계 불변식 성립, 성공 100·실패 0 (오버셀 0건)
         Stock result = stockRepository.findByGoodsId(goodsId).orElseThrow();
-        assertThat(result.getRemainQuantity())
-            .as("잔여 재고는 정확히 0이어야 한다 (음수면 초과 판매 발생)")
-            .isZero();
-        assertThat(successCount.get()).as("100개 차감 모두 성공해야 한다").isEqualTo(threadCount);
+        assertThat(result.getAvailableQuantity())
+            .as("가용 재고는 정확히 0이어야 한다 (음수면 초과 판매 발생)").isZero();
+        assertThat(result.getReservedQuantity()).as("예약 수량은 정확히 100").isEqualTo(threadCount);
+        assertThat(result.getSoldQuantity()).as("아직 결제 전이므로 판매는 0").isZero();
+        assertThat(result.getAvailableQuantity() + result.getReservedQuantity() + result.getSoldQuantity())
+            .as("합계 불변식 total=available+reserved+sold").isEqualTo(result.getTotalQuantity());
+        assertThat(successCount.get()).as("100개 예약 모두 성공해야 한다").isEqualTo(threadCount);
         assertThat(failureCount.get()).as("실패(초과 판매 차단)는 0건이어야 한다").isZero();
     }
 }

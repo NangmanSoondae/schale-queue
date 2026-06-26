@@ -53,7 +53,7 @@ reset_orders() {
 SET FOREIGN_KEY_CHECKS=0;
 DELETE FROM purchase_slot; DELETE FROM order_item; DELETE FROM payment; DELETE FROM orders;
 SET FOREIGN_KEY_CHECKS=1;
-UPDATE stock SET remain_quantity = total_quantity;
+UPDATE stock SET available_quantity = total_quantity, reserved_quantity = 0, sold_quantity = 0;
 SQL
 }
 
@@ -73,13 +73,17 @@ sample_metrics() { # $1 = 초, 부하 중 피크 스레드/힙 추적
 }
 
 oversell_check() {
-  local sold remain total
-  sold=$(mariadb_exec -N -B -e "SELECT COALESCE(SUM(quantity),0) FROM order_item WHERE goods_id=1001")
-  remain=$(mariadb_exec -N -B -e "SELECT remain_quantity FROM stock WHERE goods_id=1001")
-  total=$(mariadb_exec -N -B -e "SELECT total_quantity FROM stock WHERE goods_id=1001")
-  echo "[oversell-check] total=$total sold=$sold remain=$remain"
-  if [ "$sold" -le "$total" ] && [ "$((sold + remain))" -eq "$total" ] && [ "$remain" -ge 0 ]; then
-    echo "[oversell-check] PASS ✅ (오버셀 0건, 불변식 total=sold+remain 성립)"
+  # 예약 모델(P-S2): 주문은 available-- reserved++. 결제 미연결이라 sold=0, 성공 주문 수=reserved.
+  local total available reserved sold ordered
+  read -r total available reserved sold < <(mariadb_exec -N -B -e \
+    "SELECT total_quantity, available_quantity, reserved_quantity, sold_quantity FROM stock WHERE goods_id=1001")
+  ordered=$(mariadb_exec -N -B -e "SELECT COALESCE(SUM(quantity),0) FROM order_item WHERE goods_id=1001")
+  echo "[oversell-check] total=$total available=$available reserved=$reserved sold=$sold | 주문수량합=$ordered"
+  if [ "$available" -ge 0 ] \
+     && [ "$((available + reserved + sold))" -eq "$total" ] \
+     && [ "$((reserved + sold))" -le "$total" ] \
+     && [ "$reserved" -eq "$ordered" ]; then
+    echo "[oversell-check] PASS ✅ (오버셀 0, 합계 불변식 성립, 예약수=주문수량)"
   else
     echo "[oversell-check] FAIL ❌ (불변식 위반)"; return 1
   fi

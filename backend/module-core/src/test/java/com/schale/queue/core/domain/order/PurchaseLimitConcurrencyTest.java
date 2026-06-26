@@ -73,7 +73,7 @@ class PurchaseLimitConcurrencyTest {
             .name("한정 굿즈").price(19_000L).openAt(LocalDateTime.now())
             .maxPurchasePerMember(1).build()).getId();
         stockRepository.save(Stock.builder()
-            .goodsId(goodsId).totalQuantity(INITIAL_STOCK).remainQuantity(INITIAL_STOCK).build());
+            .goodsId(goodsId).totalQuantity(INITIAL_STOCK).availableQuantity(INITIAL_STOCK).build());
     }
 
     @AfterEach
@@ -130,7 +130,7 @@ class PurchaseLimitConcurrencyTest {
         // then — 슬롯 1건, 주문 1건, 재고는 정확히 1개만 차감(실패분은 롤백)
         assertThat(purchaseSlotRepository.count()).as("활성 슬롯은 1건").isEqualTo(1);
         assertThat(orderRepository.findByMemberId(memberId)).as("성공한 주문 1건만 영속").hasSize(1);
-        assertThat(stockRepository.findByGoodsId(goodsId).orElseThrow().getRemainQuantity())
-            .as("재고는 성공한 1건 분량만 차감").isEqualTo(INITIAL_STOCK - 1);
+        assertThat(stockRepository.findByGoodsId(goodsId).orElseThrow().getAvailableQuantity())
+            .as("가용 재고는 성공한 1건 분량만 예약 차감").isEqualTo(INITIAL_STOCK - 1);
     }
 }
