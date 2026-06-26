@@ -13,9 +13,11 @@ spring:
   application:
     name: schale-queue-worker
 
-  # 웹 서버 없이 백그라운드로만 기동 (소비 스케줄러의 비데몬 스레드가 프로세스 유지)
+  # 웹 서버 없이 백그라운드로만 기동. Virtual Threads 활성 시 스케줄러 스레드가 데몬이라
+  # JVM 이 곧장 종료되므로, keep-alive 로 비데몬 유지 스레드를 띄워 프로세스를 살린다(Boot 3.2+).
   main:
     web-application-type: none
+    keep-alive: true
 
   # Java 21 Virtual Threads 활성화 (docs/2_architecture.md 전략 1)
   threads:
