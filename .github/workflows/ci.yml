@@ -1,0 +1,36 @@
+name: CI
+
+# PR(→main)·main push 에서 빌드 + 전체 테스트로 머지 게이트를 강제한다.
+# 시크릿 불필요: 인프라 의존 통합 테스트(RUN_DB_IT / RUN_REDIS_IT)는 환경변수 미설정으로 자동 skip 되고,
+# 단위·슬라이스(@WebMvcTest) 테스트만 실행되므로 외부 자격증명 없이 통과한다.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 같은 브랜치(ref)의 진행 중 빌드는 취소하고 최신만 검증한다.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & test (JDK 21)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Build & test
+        run: ./gradlew build --no-daemon --stacktrace

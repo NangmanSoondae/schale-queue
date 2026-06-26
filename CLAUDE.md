@@ -39,6 +39,7 @@
   - **Notion Sync**: 작업 결과를 요약해 지정된 Notion 허브 페이지에 기록. (문제 발생 시 즉시 보고)
 - 🔒 **[§5.3.2] 보안 절대 원칙** — DB 비밀번호·API Key·토큰·`.mcp.json` 등 민감 정보를 **절대 노출/커밋하지 않는다.** 커밋 전 `.gitignore` 동작을 `git check-ignore`로 확인한다. 실제 시크릿은 `.env`/`application-secret.yml`로 분리.
 - 📝 **[§5.3.3] 브리핑 자동 저장** — 모든 최종 브리핑은 터미널 출력에 더해, **반드시 `docs/result/` 폴더에 `YYYYMMDD_HHMMSS_작업키워드.md`** 마크다운 파일로 저장한다. (이 폴더는 형상 관리 제외)
+- 🔀 **[§5.3.5] PR 머지 = CI 게이트** — `main` 다이렉트 푸시 금지. 모든 작업은 브랜치 분기 → push → `gh pr create --fill` → **`gh pr checks --watch`(CI 그린 대기)** → `gh pr merge --squash --delete-branch`. **CI 레드면 머지 금지**(고쳐서 재푸시). 무검증 즉시 머지(구 패스트트랙)는 폐기됨(2026-06-26).
 
 ---
 
