@@ -2,6 +2,7 @@ package com.schale.queue.api.common;
 
 import com.schale.queue.api.order.AdmissionRequiredException;
 import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
+import com.schale.queue.core.domain.payment.PaymentNotConfirmableException;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -44,6 +45,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handlePurchaseLimit(PurchaseLimitExceededException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
             .body(ErrorResponse.of("PURCHASE_LIMIT_EXCEEDED", e.getMessage()));
+    }
+
+    /** 이미 확정/만료된 결제를 다시 확정하려는 경우(P-P2 멱등). */
+    @ExceptionHandler(PaymentNotConfirmableException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentNotConfirmable(PaymentNotConfirmableException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse.of("PAYMENT_NOT_CONFIRMABLE", e.getMessage()));
     }
 
     /** 존재하지 않는 상품/재고 등 잘못된 인자. */
