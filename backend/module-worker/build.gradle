@@ -16,4 +16,11 @@ dependencies {
 
     // 백그라운드 워커: 웹 계층 없이 Spring 컨텍스트만 기동
     implementation 'org.springframework.boot:spring-boot-starter'
+
+    // 후방 이벤트 구독: Kafka consumer (ADR-002, 주문완료 → 알림 발송 UC-08)
+    //  알림 게이트웨이 호출은 JDK 내장 HttpClient 를 써서 웹 서버 의존(tomcat) 없이 처리한다.
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // 알림 페이로드 JSON 직렬화(게이트웨이/웹훅 본문 — 한글·이모지 안전 인코딩). 버전은 Boot BOM 관리.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
 }

@@ -34,6 +34,13 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # 후방 이벤트 발행(ADR-002). 주문완료 이벤트를 JSON 으로 직렬화해 order.completed 토픽에 보낸다.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
 server:
   port: ${SERVER_PORT:8080}
 

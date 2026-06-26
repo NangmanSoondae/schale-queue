@@ -18,6 +18,9 @@ dependencies {
     // 관측성: Actuator — JVM 스레드/메모리 등 런타임 지표 노출(§9.3.6). 부하 중 VT vs 플랫폼 계측에 사용.
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+    // 후방 이벤트 발행: Kafka producer (ADR-002, 주문완료 이벤트 발행)
+    implementation 'org.springframework.kafka:spring-kafka'
+
     // API 문서화: Springdoc OpenAPI (Swagger UI)
     //  버전 근거(§5.4.2): 2.8.x 라인은 Spring Boot 3.4 / Spring Framework 6.2 타깃,
     //  OpenAPI 3.1 지원. 2.8.6 은 2.8 라인 최신 패치(누적 버그픽스)로 우리 스택과 정합.

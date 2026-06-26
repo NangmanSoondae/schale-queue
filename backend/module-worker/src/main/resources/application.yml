@@ -28,6 +28,17 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # 후방 이벤트 구독(ADR-002, UC-08). order.completed 를 notification 그룹으로 읽어 알림을 보낸다.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: latest
+      properties:
+        spring.json.trusted.packages: "com.schale.queue.*"
+        spring.json.value.default.type: com.schale.queue.core.domain.order.event.OrderCompletedEvent
+
   # 결제 만료 정리(UC-07)용 DB. api 와 동일 스키마에 접속한다(민감 값은 외부 주입).
   datasource:
     url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
