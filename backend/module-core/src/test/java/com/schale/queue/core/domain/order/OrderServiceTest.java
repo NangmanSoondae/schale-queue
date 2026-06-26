@@ -1,15 +1,20 @@
 package com.schale.queue.core.domain.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 
 import com.schale.queue.core.domain.goods.Goods;
 import com.schale.queue.core.domain.goods.repository.GoodsRepository;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
+import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
 import com.schale.queue.core.domain.payment.Payment;
 import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
@@ -53,6 +58,9 @@ class OrderServiceTest {
 
     @Mock
     private PaymentRepository paymentRepository;
+
+    @Mock
+    private PurchaseSlotRepository purchaseSlotRepository;
 
     @InjectMocks
     private OrderService orderService;
@@ -118,5 +126,25 @@ class OrderServiceTest {
         assertThat(savedPayment.getTimeoutAt())
             .as("결제 만료 시각은 주문 시점 +5분 근방이어야 한다")
             .isBetween(before.plusMinutes(5), after.plusMinutes(5));
+    }
+
+    @Test
+    @DisplayName("주문 수량이 1인 구매 한도를 넘으면 재고 차감 전에 한도 초과로 거부한다(P-O3)")
+    void createOrder_rejects_when_quantity_exceeds_purchase_limit() {
+        // given — 1인 한도 2개 상품에 3개 주문 시도
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.now())
+            .maxPurchasePerMember(2)
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+
+        // when & then — 한도 초과 예외, 재고는 손대지 않는다(fail-fast)
+        assertThatThrownBy(() -> orderService.createOrder(1L, goodsId, 3))
+            .isInstanceOf(PurchaseLimitExceededException.class);
+        then(stockService).should(never()).decrease(anyLong(), anyInt());
+        then(orderRepository).should(never()).save(any(Order.class));
     }
 }

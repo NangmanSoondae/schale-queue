@@ -3,6 +3,7 @@ package com.schale.queue.api.order;
 import com.schale.queue.api.order.dto.OrderResponse;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderService;
+import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
 import com.schale.queue.core.domain.queue.AdmissionTokenService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,9 +59,11 @@ public class OrderFacade {
         }
     }
 
-    /** 도메인이 입력/상태 위반에 던지는 예외만 비즈니스 거부로 분류하고, 그 외는 시스템 오류로 본다. */
+    /** 도메인이 입력/상태/한도 위반에 던지는 예외만 비즈니스 거부로 분류하고, 그 외는 시스템 오류로 본다. */
     private boolean isSystemError(RuntimeException e) {
-        return !(e instanceof IllegalArgumentException || e instanceof IllegalStateException);
+        return !(e instanceof IllegalArgumentException
+            || e instanceof IllegalStateException
+            || e instanceof PurchaseLimitExceededException);
     }
 
     /** 재발급 실패가 원래 오류를 가리지 않도록 삼키고 기록만 한다(Redis 불안정 시 사용자는 재진입으로 복구 가능). */

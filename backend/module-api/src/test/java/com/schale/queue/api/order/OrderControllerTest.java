@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schale.queue.api.order.dto.OrderResponse;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -91,6 +92,23 @@ class OrderControllerTest {
                 .content(body))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("STOCK_CONFLICT"));
+    }
+
+    @Test
+    @DisplayName("1인 구매 한도 초과는 409 Conflict 와 PURCHASE_LIMIT_EXCEEDED 코드를 반환한다")
+    void create_returns_409_when_purchase_limit_exceeded() throws Exception {
+        // given
+        given(orderFacade.placeOrder(eq(42L), eq(1L), anyInt()))
+            .willThrow(new PurchaseLimitExceededException("1인 구매 한도를 초과했습니다."));
+        String body = objectMapper.writeValueAsString(new TestRequest(1L, 1));
+
+        // when & then
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, 42L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("PURCHASE_LIMIT_EXCEEDED"));
     }
 
     @Test

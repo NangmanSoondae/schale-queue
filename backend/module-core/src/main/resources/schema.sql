@@ -12,6 +12,7 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS purchase_slot;
 DROP TABLE IF EXISTS payment;
 DROP TABLE IF EXISTS order_item;
 DROP TABLE IF EXISTS orders;
@@ -48,6 +49,7 @@ CREATE TABLE goods (
     description TEXT         NULL                     COMMENT '상품 설명',
     price       BIGINT       NOT NULL                COMMENT '판매 가격(KRW, 정수)',
     open_at     DATETIME     NOT NULL                COMMENT '판매 오픈 일시(선착순 시작)',
+    max_purchase_per_member INT NULL DEFAULT 1       COMMENT '1인 구매 한도(P-O3, NULL=무제한)',
     created_at  DATETIME     NOT NULL                COMMENT '생성 일시',
     updated_at  DATETIME     NOT NULL                COMMENT '수정 일시',
     PRIMARY KEY (id),
@@ -95,6 +97,28 @@ CREATE TABLE orders (
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
   COMMENT = '주문';
+
+-- ----------------------------------------------------------------------------
+--  purchase_slot : 1인 구매 한도 슬롯 (P-O3)
+--  (member_id, goods_id) UNIQUE 로 같은 회원의 동일 상품 활성 주문을 1건으로 제한.
+--  동시 중복 주문을 DB 가 원자적으로 차단(애플리케이션 TOCTOU 경합 배제). 취소/만료 시 행 삭제로 반납.
+-- ----------------------------------------------------------------------------
+CREATE TABLE purchase_slot (
+    id          BIGINT NOT NULL AUTO_INCREMENT COMMENT 'PK',
+    member_id   BIGINT NOT NULL                COMMENT '회원 FK',
+    goods_id    BIGINT NOT NULL                COMMENT '상품 FK',
+    order_id    BIGINT NOT NULL                COMMENT '슬롯을 점유한 주문 FK',
+    created_at  DATETIME NOT NULL              COMMENT '생성 일시',
+    updated_at  DATETIME NOT NULL              COMMENT '수정 일시',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_purchase_slot_member_goods (member_id, goods_id),  -- 활성 1건 보장(P-O3)
+    CONSTRAINT fk_purchase_slot_member FOREIGN KEY (member_id) REFERENCES member (id),
+    CONSTRAINT fk_purchase_slot_goods  FOREIGN KEY (goods_id)  REFERENCES goods (id),
+    CONSTRAINT fk_purchase_slot_order  FOREIGN KEY (order_id)  REFERENCES orders (id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT = '1인 구매 한도 슬롯';
 
 -- ----------------------------------------------------------------------------
 --  order_item : 주문 항목 (주문 1 : N 항목)

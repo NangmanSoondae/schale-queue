@@ -51,7 +51,7 @@ reset_orders() {
   echo "[reset-orders] 주문/항목/결제 비우고 재고 원복…"
   mariadb_exec <<'SQL'
 SET FOREIGN_KEY_CHECKS=0;
-DELETE FROM order_item; DELETE FROM payment; DELETE FROM orders;
+DELETE FROM purchase_slot; DELETE FROM order_item; DELETE FROM payment; DELETE FROM orders;
 SET FOREIGN_KEY_CHECKS=1;
 UPDATE stock SET remain_quantity = total_quantity;
 SQL

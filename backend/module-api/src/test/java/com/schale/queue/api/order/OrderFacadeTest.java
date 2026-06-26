@@ -10,6 +10,7 @@ import com.schale.queue.api.order.dto.OrderResponse;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderService;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
 import com.schale.queue.core.domain.queue.AdmissionTokenService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -86,6 +87,20 @@ class OrderFacadeTest {
         // when & then — 예외는 전파되고, 토큰은 소진된 채 둔다
         assertThatThrownBy(() -> orderFacade.placeOrder(MEMBER_ID, GOODS_ID, QUANTITY))
             .isInstanceOf(IllegalStateException.class);
+        then(admissionTokenService).should(never()).issue(GOODS_ID, MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("1인 한도 초과(P-O3)는 비즈니스 거부이므로 토큰을 재발급하지 않는다")
+    void does_not_reissue_on_purchase_limit() {
+        // given — 소비 성공 후 주문이 한도 초과로 실패
+        given(admissionTokenService.revoke(GOODS_ID, MEMBER_ID)).willReturn(true);
+        given(orderService.createOrder(MEMBER_ID, GOODS_ID, QUANTITY))
+            .willThrow(new PurchaseLimitExceededException("한도 초과"));
+
+        // when & then — 예외 전파, 토큰은 소진 유지(재발급 없음)
+        assertThatThrownBy(() -> orderFacade.placeOrder(MEMBER_ID, GOODS_ID, QUANTITY))
+            .isInstanceOf(PurchaseLimitExceededException.class);
         then(admissionTokenService).should(never()).issue(GOODS_ID, MEMBER_ID);
     }
 
