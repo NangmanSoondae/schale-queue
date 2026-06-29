@@ -42,8 +42,8 @@ spring:
       auto-offset-reset: latest
       properties:
         spring.json.trusted.packages: "com.schale.queue.*"
-        spring.json.value.default.type: com.schale.queue.core.domain.order.event.OrderCompletedEvent
-        spring.json.use.type.headers: false   # 릴레이가 보낸 raw JSON 엔 타입 헤더가 없으므로 default.type 사용
+        spring.json.use.type.headers: false   # 릴레이가 보낸 raw JSON 엔 타입 헤더가 없음
+        # 역직렬화 대상 타입은 토픽마다 달라(주문완료/취소) 리스너별 @KafkaListener(properties=...)로 지정한다.
 
   # 결제 만료 정리(UC-07)용 DB. api 와 동일 스키마에 접속한다(민감 값은 외부 주입).
   datasource:

@@ -9,6 +9,7 @@ import com.schale.queue.core.domain.payment.Payment;
 import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
 import com.schale.queue.core.domain.stock.StockService;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,7 @@ public class OrderService {
     private final OrderItemRepository orderItemRepository;
     private final PaymentRepository paymentRepository;
     private final PurchaseSlotRepository purchaseSlotRepository;
+    private final Clock clock;
 
     /**
      * 단일 상품 주문을 생성한다. 재고 차감 → 주문/항목/결제 생성을 하나의 트랜잭션으로 묶는다.
@@ -104,7 +106,10 @@ public class OrderService {
             .orderId(order.getId())
             .amount(totalAmount)
             .status(PaymentStatus.READY)
-            .timeoutAt(LocalDateTime.now().plus(PAYMENT_TIMEOUT))
+            // 만료 검사(PaymentExpiryWorker)와 '같은 시간 출처(Clock)'를 써야 한다. 과거엔 여기서
+            // 시스템 기본 존의 now() 를, 만료 검사는 UTC clock 을 써 타임존이 어긋나 만료가 ~9h 늦게
+            // 발동했다(troubleshooting No.10). Clock 으로 통일해 생성·검사를 일관되게 맞춘다.
+            .timeoutAt(LocalDateTime.now(clock).plus(PAYMENT_TIMEOUT))
             .build());
 
         // ⑦ 활성 구매 슬롯을 점유한다(P-O3 동시성). (member, goods) 유니크 제약이 같은 회원의 동시

@@ -19,7 +19,10 @@ import com.schale.queue.core.domain.payment.Payment;
 import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
 import com.schale.queue.core.domain.stock.StockService;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,6 +65,12 @@ class OrderServiceTest {
     @Mock
     private PurchaseSlotRepository purchaseSlotRepository;
 
+    // 결제 만료 시각 검증을 결정적으로 하기 위한 고정 Clock(UTC). 만료 검사와 동일 출처(troubleshooting No.10).
+    private static final Instant FIXED_INSTANT = Instant.parse("2026-06-29T00:00:00Z");
+
+    @Mock
+    private Clock clock;
+
     @InjectMocks
     private OrderService orderService;
 
@@ -87,13 +96,13 @@ class OrderServiceTest {
             ReflectionTestUtils.setField(saved, "id", 100L);
             return saved;
         });
-
-        LocalDateTime before = LocalDateTime.now();
+        // 고정 Clock 으로 만료 시각을 결정적으로 검증한다(now() 비결정성 제거).
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+        LocalDateTime fixedNow = LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC);
 
         // when
         Order created = orderService.createOrder(memberId, goodsId, quantity);
-
-        LocalDateTime after = LocalDateTime.now();
 
         // then — 반환된 주문은 PENDING, 총액 정확
         assertThat(created.getOrderStatus()).isEqualTo(OrderStatus.PENDING);
@@ -124,8 +133,8 @@ class OrderServiceTest {
         assertThat(savedPayment.getStatus()).isEqualTo(PaymentStatus.READY);
         assertThat(savedPayment.getPaymentUid()).isNull();
         assertThat(savedPayment.getTimeoutAt())
-            .as("결제 만료 시각은 주문 시점 +5분 근방이어야 한다")
-            .isBetween(before.plusMinutes(5), after.plusMinutes(5));
+            .as("결제 만료 시각은 고정 Clock 기준 +5분이어야 한다")
+            .isEqualTo(fixedNow.plusMinutes(5));
     }
 
     @Test

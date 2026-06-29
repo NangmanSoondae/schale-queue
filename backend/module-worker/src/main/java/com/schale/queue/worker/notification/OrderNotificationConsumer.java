@@ -32,7 +32,10 @@ public class OrderNotificationConsumer {
     private final NotifyGatewayClient notifyGatewayClient;
     private final ProcessedEventRepository processedEventRepository;
 
-    @KafkaListener(topics = OrderCompletedEvent.TOPIC, groupId = GROUP)
+    // 토픽마다 이벤트 타입이 다르므로(주문완료/취소), 역직렬화 대상 타입을 리스너별로 명시한다.
+    // 릴레이가 보낸 raw JSON 엔 타입 헤더가 없어 default.type 으로 결정한다(ADR-007).
+    @KafkaListener(topics = OrderCompletedEvent.TOPIC, groupId = GROUP,
+        properties = "spring.json.value.default.type=com.schale.queue.core.domain.order.event.OrderCompletedEvent")
     @Transactional
     public void onOrderCompleted(OrderCompletedEvent event) {
         if (processedEventRepository.existsByEventIdAndConsumerGroup(event.eventId(), GROUP)) {

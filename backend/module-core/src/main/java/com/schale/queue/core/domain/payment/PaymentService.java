@@ -5,6 +5,7 @@ import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schale.queue.core.domain.order.event.OrderCancelledEvent;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
@@ -71,15 +72,15 @@ public class PaymentService {
             OrderCompletedEvent.of(orderId, order.getMemberId(), order.getTotalAmount());
         outboxRepository.save(EventOutbox.pending(
             event.eventId(), "ORDER", String.valueOf(orderId),
-            OrderCompletedEvent.TOPIC, String.valueOf(orderId), serialize(event)));
+            OrderCompletedEvent.TOPIC, String.valueOf(orderId), toJson(event, orderId)));
     }
 
-    /** 이벤트를 아웃박스 payload(JSON)로 직렬화한다. 직렬화 실패는 결제 확정 전체를 롤백시킨다(정합성 우선). */
-    private String serialize(OrderCompletedEvent event) {
+    /** 이벤트를 아웃박스 payload(JSON)로 직렬화한다. 직렬화 실패는 해당 트랜잭션 전체를 롤백시킨다(정합성 우선). */
+    private String toJson(Object event, Long orderId) {
         try {
             return objectMapper.writeValueAsString(event);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("주문완료 이벤트 직렬화 실패 orderId=" + event.orderId(), e);
+            throw new IllegalStateException("이벤트 직렬화 실패 orderId=" + orderId, e);
         }
     }
 
@@ -109,5 +110,14 @@ public class PaymentService {
         }
         order.changeStatus(OrderStatus.CANCELLED);
         payment.changeStatus(PaymentStatus.EXPIRED);
+
+        // 주문 취소 이벤트를 '이 트랜잭션' 안에서 아웃박스에 기록한다(ADR-007, 주문완료와 동일 패턴).
+        // 워커 릴레이가 order.cancelled 토픽으로 발행하고, 취소 알림 컨슈머가 구독한다. no-op(멱등) 경로에선
+        // 위에서 이미 return 했으므로, 실제 취소가 일어난 경우에만 이벤트가 나간다(팬텀 취소 방지).
+        OrderCancelledEvent event =
+            OrderCancelledEvent.of(orderId, order.getMemberId(), OrderCancelledEvent.REASON_PAYMENT_EXPIRED);
+        outboxRepository.save(EventOutbox.pending(
+            event.eventId(), "ORDER", String.valueOf(orderId),
+            OrderCancelledEvent.TOPIC, String.valueOf(orderId), toJson(event, orderId)));
     }
 }
