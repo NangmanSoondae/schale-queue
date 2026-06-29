@@ -54,8 +54,12 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate                # 스키마는 schema.sql 관리, 엔티티-스키마 검증만
+      ddl-auto: validate                # DDL 은 Flyway 관리(ADR-008), Hibernate 는 엔티티-스키마 검증만
     open-in-view: false
+
+  # DB 스키마 마이그레이션(ADR-008). api 와 같은 DB — Flyway 잠금으로 동시 적용도 안전(먼저 잡은 쪽만).
+  flyway:
+    baseline-on-migrate: true           # 이력 테이블 없는 기존 DB 는 V1 로 baseline 후 이후 버전만 적용(No.09 흡수)
 
 # 대기열 소비(P-Q4 입장률 throttle) — rate ≈ batch-size ÷ interval 을 DB 보호 상한(S3) 이하로 유지
 schale:

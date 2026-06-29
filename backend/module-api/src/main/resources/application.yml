@@ -23,11 +23,15 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate                # DDL 은 schema.sql 로 관리, 엔티티-스키마 검증만 수행
+      ddl-auto: validate                # DDL 은 Flyway 가 관리(ADR-008), Hibernate 는 엔티티-스키마 검증만
     open-in-view: false                 # OSIV 비활성 — 영속성 컨텍스트 수명 제어
     properties:
       hibernate:
         format_sql: true
+
+  # DB 스키마 마이그레이션(ADR-008). 부팅 시 db/migration/V*.sql 을 버전 순 자동 적용.
+  flyway:
+    baseline-on-migrate: true           # 이력 테이블 없는 기존 DB 는 V1 로 baseline 후 이후 버전만 적용(No.09 흡수)
 
   data:
     redis:

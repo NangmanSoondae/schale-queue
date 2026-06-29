@@ -3,7 +3,8 @@
 #  ----------------------------------------------------------------------------
 #  - 계정/DB 정보는 .env 파일의 변수를 참조한다. (docs/5_code_of_conduct.md §5.3.2)
 #    → 실행 전 `cp .env.example .env` 후 실제 값을 채울 것.
-#  - MariaDB: 컨테이너 최초 기동 시 schema.sql 을 자동 실행하여 테이블 생성.
+#  - MariaDB: 스키마는 앱 부팅 시 Flyway 가 db/migration/V*.sql 로 적용한다(ADR-008).
+#    (과거 schema.sql initdb 마운트는 최초 1회만 실행돼 드리프트를 유발 → 제거, troubleshooting No.09)
 #  - Redis  : AOF 영속화 + 로컬 볼륨으로 데이터 보존.
 #  실행: docker-compose up -d   /   종료: docker-compose down
 # ============================================================================
@@ -23,10 +24,8 @@ services:
       MARIADB_PASSWORD: ${DB_PASSWORD}
       TZ: Asia/Seoul
     volumes:
-      # 데이터 영속화
+      # 데이터 영속화 (스키마는 Flyway 가 앱 부팅 시 적용 — initdb 마운트 제거, ADR-008)
       - schale-mariadb-data:/var/lib/mysql
-      # 최초 기동 시 자동 실행: schema.sql → 테이블 생성 (읽기 전용 마운트)
-      - ./backend/module-core/src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
