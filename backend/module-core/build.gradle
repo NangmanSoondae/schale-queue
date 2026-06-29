@@ -17,6 +17,11 @@ dependencies {
     // 영속성: Spring Data JPA
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
+    // DB 스키마 마이그레이션: Flyway (ADR-008). 부팅 시 db/migration/V*.sql 을 버전 순 자동 적용.
+    //  MariaDB 는 flyway-mysql 모듈이 담당(MySQL 호환 방언). 버전은 Boot BOM 관리.
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-mysql'
+
     // 아웃박스 이벤트 직렬화(ADR-007): ObjectMapper 로 이벤트→JSON. Kafka 비의존(순수 JSON).
     //  버전은 Boot BOM 관리. 실제 빈은 각 실행 모듈(api/worker)의 Boot 자동구성 ObjectMapper 가 주입된다.
     implementation 'com.fasterxml.jackson.core:jackson-databind'

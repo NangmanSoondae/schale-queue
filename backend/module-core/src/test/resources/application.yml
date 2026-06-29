@@ -1,6 +1,6 @@
 # module-core 통합 테스트 설정
 #  - 동시성 테스트는 docker-compose 로 띄운 실제 MariaDB(InnoDB)에 접속한다.
-#  - 스키마는 schema.sql(initdb)로 이미 생성되어 있으므로 ddl-auto=none.
+#  - 스키마는 @SpringBootTest 컨텍스트 부팅 시 Flyway 가 db/migration 으로 적용한다(ADR-008) → ddl-auto=none.
 #  - 접속 정보는 환경변수로 주입한다(기본값은 비밀이 아닌 로컬 플레이스홀더). (§5.3.2)
 spring:
   datasource:
@@ -17,3 +17,5 @@ spring:
     properties:
       hibernate:
         format_sql: false
+  flyway:
+    baseline-on-migrate: true   # 기존(이력 없는) DB 도 흡수 — V1 baseline 후 이후 버전 적용(ADR-008)
