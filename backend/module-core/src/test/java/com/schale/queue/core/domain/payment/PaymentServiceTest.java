@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.schale.queue.core.domain.order.event.OrderCancelledEvent;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
@@ -109,13 +110,15 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("만료: READY 결제를 EXPIRED 로, 재고 reserved→available(release), 슬롯 반납, 주문 CANCELLED")
-    void expireOne_releases_stock_and_slot() {
+    @DisplayName("만료: READY 결제를 EXPIRED 로, 재고 reserved→available(release), 슬롯 반납, 주문 CANCELLED, 취소 아웃박스 적재")
+    void expireOne_releases_stock_and_slot_and_writes_outbox() throws Exception {
         Payment payment = payment(PaymentStatus.READY);
         Order order = order();
         given(paymentRepository.findByOrderIdWithPessimisticLock(ORDER_ID)).willReturn(Optional.of(payment));
         given(orderRepository.findById(ORDER_ID)).willReturn(Optional.of(order));
         given(orderItemRepository.findByOrderId(ORDER_ID)).willReturn(List.of(item()));
+        given(objectMapper.writeValueAsString(any(OrderCancelledEvent.class)))
+            .willReturn("{\"orderId\":100,\"reason\":\"PAYMENT_EXPIRED\"}");
 
         paymentService.expireOne(ORDER_ID);
 
@@ -123,10 +126,19 @@ class PaymentServiceTest {
         then(purchaseSlotRepository).should().deleteByMemberIdAndGoodsId(MEMBER_ID, GOODS_ID);
         assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.EXPIRED);
+
+        // 취소 이벤트를 '같은 트랜잭션'에서 아웃박스에 적재한다(ADR-007)
+        ArgumentCaptor<EventOutbox> captor = ArgumentCaptor.forClass(EventOutbox.class);
+        then(outboxRepository).should().save(captor.capture());
+        EventOutbox saved = captor.getValue();
+        assertThat(saved.getTopic()).isEqualTo(OrderCancelledEvent.TOPIC);
+        assertThat(saved.getAggregateId()).isEqualTo(String.valueOf(ORDER_ID));
+        assertThat(saved.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(saved.getEventId()).isNotBlank();
     }
 
     @Test
-    @DisplayName("만료 멱등: 이미 PAID(경합으로 확정됨)면 아무것도 하지 않는다(no-op)")
+    @DisplayName("만료 멱등: 이미 PAID(경합으로 확정됨)면 아무것도 하지 않는다(no-op), 아웃박스 미적재")
     void expireOne_noop_when_not_ready() {
         given(paymentRepository.findByOrderIdWithPessimisticLock(ORDER_ID))
             .willReturn(Optional.of(payment(PaymentStatus.PAID)));
@@ -135,5 +147,6 @@ class PaymentServiceTest {
 
         then(stockService).should(never()).release(anyLong(), anyInt());
         then(purchaseSlotRepository).shouldHaveNoInteractions();
+        then(outboxRepository).should(never()).save(any());
     }
 }

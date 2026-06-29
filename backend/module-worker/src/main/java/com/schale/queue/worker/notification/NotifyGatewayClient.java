@@ -1,6 +1,7 @@
 package com.schale.queue.worker.notification;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schale.queue.core.domain.order.event.OrderCancelledEvent;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -39,22 +40,34 @@ public class NotifyGatewayClient {
     public void notifyOrderCompleted(OrderCompletedEvent event) {
         String message = String.format("🎫 주문 #%d 결제 완료 (회원 %d, 금액 %,d원)",
             event.orderId(), event.memberId(), event.totalAmount());
-        if (sendViaGateway(message)) {
+        notify("[주문 완료]", message, event.orderId());
+    }
+
+    /** 주문 취소 알림을 전송한다(결제 만료 등). 전송 경로/폴백 정책은 주문 완료와 동일하다. */
+    public void notifyOrderCancelled(OrderCancelledEvent event) {
+        String message = String.format("❌ 주문 #%d 취소 (회원 %d, 사유 %s)",
+            event.orderId(), event.memberId(), event.reason());
+        notify("[주문 취소]", message, event.orderId());
+    }
+
+    /** 1차 게이트웨이 → 실패 시 웹훅 폴백 → 둘 다 불가하면 건너뛴다(작업 흐름 무영향). */
+    private void notify(String title, String message, Long orderId) {
+        if (sendViaGateway(title, message)) {
             return;
         }
         if (sendViaWebhook(message)) {
             return;
         }
-        log.warn("알림 전송 경로 없음(게이트웨이·웹훅 미설정/도달불가) — 건너뜀. orderId={}", event.orderId());
+        log.warn("알림 전송 경로 없음(게이트웨이·웹훅 미설정/도달불가) — 건너뜀. orderId={}", orderId);
     }
 
-    private boolean sendViaGateway(String message) {
+    private boolean sendViaGateway(String title, String message) {
         if (gatewayUrl.isBlank() || apiKey.isBlank()) {
             return false;
         }
         try {
             String body = mapper.writeValueAsString(Map.of(
-                "channel", "discord", "to", "schale-ops", "title", "[주문 완료]", "message", message));
+                "channel", "discord", "to", "schale-ops", "title", title, "message", message));
             HttpRequest req = HttpRequest.newBuilder(URI.create(gatewayUrl + "/api/v1/notifications"))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")

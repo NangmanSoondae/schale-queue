@@ -308,4 +308,33 @@ MariaDB 컨테이너의 `docker-entrypoint-initdb.d/schema.sql` 은 **데이터 
 방안 B 로 `event_outbox`/`processed_event` 를 running DB 에 `CREATE TABLE IF NOT EXISTS` 로 직접 생성(정의는 `schema.sql` 과 동일).
 
 ### 5) 결과 (Result)
-두 테이블 생성 후 앱 검증(validate) 통과·e2e 진행. **임시방편임을 명시한다** — 근본 해결은 마이그레이션 도구 도입(방안 C)이며, 그전까지 신규 테이블 추가 시엔 (a) 로컬 볼륨 재생성 또는 (b) 수동 DDL 적용이 필요하다(후속 후보로 기록).
+두 테이블 생성 후 앱 검증(validate) 통과·e2e 진행. **임시방편임을 명시한다** — 근본 해결은 마이그레이션 도구 도입(방안 C)이며, 그전까지 신규 테이블 추가 시엔 (a) 로컬 볼륨 재생성 또는 (b) 수동 DDL 적용이 필요하다(후속 후보로 기록). (→ ADR-008 Flyway 도입으로 근본 해결됨)
+
+## [No.10] 결제 만료가 발동하지 않음 — 생성/검사 타임존 불일치(시스템존 vs UTC clock)
+
+- **일자**: 2026-06-29
+- **관련 Phase**: Phase 4 (주문취소 이벤트 e2e 중 발견)
+- **태그**: `#타임존` `#Clock` `#결제만료` `#통합결함`
+
+### 1) 발견 (Discovery)
+주문취소 이벤트(결제 만료 → 취소) e2e 에서, 만료 임박 결제를 시드하고 워커를 띄웠으나 **만료 정리가 전혀 발동하지 않았다**(`결제 만료 정리` 로그 없음 = 대상 0건). DB 의 `timeout_at` 은 분명 과거였다.
+
+```
+앱 now(만료 검사) ≈ 09:08 (UTC)   vs   timeout_at = 18:04 (KST 로 저장)
+→ 18:04 < 09:08 = false → 만료 대상 아님
+```
+
+### 2) 분석 (Analysis)
+시간 출처가 두 곳에서 **달랐다**. `OrderService` 의 결제 생성은 `LocalDateTime.now()`(**시스템 기본 존 = KST**)로 `timeout_at` 을 설정했는데, 만료 검사 `PaymentExpiryWorker → PaymentService.findDueOrderIds(LocalDateTime.now(clock))` 는 `clock = systemUTC()`(**UTC**)를 썼다. MariaDB 의 naive `DATETIME` 에 KST 로 적힌 값과 UTC 로 계산한 now 를 비교하니 ~9시간 어긋나, **5분짜리 타임아웃이 사실상 ~9시간 늦게** 발동하는 셈이었다(실서비스에선 치명적). 프로젝트 의도는 `Clock` 빈(UTC)으로 시간을 통일하는 것인데 `OrderService` 만 이 규약을 벗어나 있었다.
+
+> 단위 테스트가 못 잡은 이유: `OrderServiceTest` 도 `LocalDateTime.now()`(시스템존)로 기대값을 만들어 서비스와 **같은 편향**을 공유했고(로컬 KST 에선 우연히 일치), 만료 검사와의 교차 검증은 없었다. e2e(실 워커 부팅)가 비로소 드러냈다(No.05/06/08 과 같은 교훈).
+
+### 3) 고찰 (Contemplation)
+- **방안 A — 만료 검사를 시스템존 now() 로**: OrderService 와 맞지만 주입형 Clock(테스트 결정성)을 버리고 시스템 존에 의존(이식성↓).
+- **방안 B — 생성도 주입 Clock(UTC) 으로 통일(채택)**: 프로젝트 의도(UTC 단일 출처)에 부합, 테스트에서 고정 Clock 으로 결정적 검증 가능, 호스트 존에 무관.
+
+### 4) 해결 (Resolution)
+`OrderService` 에 `Clock` 를 주입하고 `timeoutAt(LocalDateTime.now(clock).plus(PAYMENT_TIMEOUT))` 로 변경 → 생성·검사가 **동일한 UTC Clock** 을 공유. `OrderServiceTest` 는 고정 Clock(`Clock` 목 + `Instant.parse(...)`/`ZoneOffset.UTC`)으로 만료 시각을 결정적으로 검증하도록 고쳤다.
+
+### 5) 결과 (Result)
+수정 후 e2e 재현: 만료 임박 결제가 즉시 만료 대상으로 잡혀 **`결제 만료 정리 1건` → 주문 CANCELLED·결제 EXPIRED·재고 해제 → 취소 이벤트 아웃박스(SENT) → `주문취소 이벤트 수신`** 까지 한 사이클이 흘렀다. 시간 의존 로직은 반드시 **단일 Clock 출처**로 통일해야 함을 확인. (잔여: 이벤트 occurredAt·감사 컬럼의 시스템존 now() 는 비교에 쓰이지 않는 표시값이라 현 범위 밖.)

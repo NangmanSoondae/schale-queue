@@ -3,6 +3,7 @@ package com.schale.queue.worker.outbox;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schale.queue.core.domain.order.event.OrderCancelledEvent;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.DisplayName;
@@ -39,6 +40,28 @@ class OutboxEventSerdeTest {
 
             assertThat(restored).isEqualTo(event);
             assertThat(restored.occurredAt()).isEqualTo(event.occurredAt());   // LocalDateTime 손실 없음
+        }
+    }
+
+    @Test
+    @DisplayName("OrderCancelledEvent 도 손실 없이 역직렬화된다(reason·LocalDateTime 포함)")
+    void cancelled_event_round_trips() throws Exception {
+        OrderCancelledEvent event =
+            OrderCancelledEvent.of(1001L, 42L, OrderCancelledEvent.REASON_PAYMENT_EXPIRED);
+
+        ObjectMapper mapper = JacksonUtils.enhancedObjectMapper();
+        String payload = mapper.writeValueAsString(event);
+
+        try (JsonDeserializer<OrderCancelledEvent> deserializer =
+                 new JsonDeserializer<>(OrderCancelledEvent.class).ignoreTypeHeaders()) {
+            deserializer.addTrustedPackages("com.schale.queue.*");
+
+            OrderCancelledEvent restored =
+                deserializer.deserialize(OrderCancelledEvent.TOPIC, payload.getBytes(StandardCharsets.UTF_8));
+
+            assertThat(restored).isEqualTo(event);
+            assertThat(restored.reason()).isEqualTo(OrderCancelledEvent.REASON_PAYMENT_EXPIRED);
+            assertThat(restored.occurredAt()).isEqualTo(event.occurredAt());
         }
     }
 }
