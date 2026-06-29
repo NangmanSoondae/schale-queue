@@ -47,6 +47,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # 후방 이벤트 파이프라인(ADR-002 §2). KRaft 단일노드(주키퍼 없이 브로커 혼자) — 로컬 최소 구성.
+  # 호스트에서 실행되는 앱은 localhost:9092 로 접속한다(KAFKA_ADVERTISED_LISTENERS).
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: schale-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"     # order.completed 토픽 자동 생성
+    volumes:
+      - schale-kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   schale-mariadb-data:
   schale-redis-data:
+  schale-kafka-data:

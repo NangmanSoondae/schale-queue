@@ -3,6 +3,7 @@ package com.schale.queue.core.domain.payment;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
 import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
@@ -11,6 +12,7 @@ import com.schale.queue.core.domain.stock.StockService;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,7 @@ public class PaymentService {
     private final OrderItemRepository orderItemRepository;
     private final StockService stockService;
     private final PurchaseSlotRepository purchaseSlotRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 결제 확정(UC-06): {@code READY→PAID}, 재고 {@code reserved→sold}(P-S2), 주문 {@code COMPLETED}.
@@ -53,9 +56,14 @@ public class PaymentService {
             stockService.confirm(item.getGoodsId(), item.getQuantity());   // reserved→sold
         }
         payment.approve(approvalUid != null ? approvalUid : "SIM-" + orderId);
-        orderRepository.findById(orderId)
-            .orElseThrow(() -> new IllegalArgumentException("주문이 존재하지 않습니다. orderId=" + orderId))
-            .changeStatus(OrderStatus.COMPLETED);
+        Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new IllegalArgumentException("주문이 존재하지 않습니다. orderId=" + orderId));
+        order.changeStatus(OrderStatus.COMPLETED);
+
+        // 주문 완료 이벤트 발행(ADR-002 후방 파이프라인). core 는 Kafka 비의존 — ApplicationEvent 로 발행하고,
+        // api 의 브리지가 트랜잭션 커밋 후 Kafka 로 내보낸다(AFTER_COMMIT). 컨슈머가 알림을 보낸다(UC-08).
+        eventPublisher.publishEvent(
+            OrderCompletedEvent.of(orderId, order.getMemberId(), order.getTotalAmount()));
     }
 
     /** 만료 대상 주문 ID 목록(READY + {@code timeoutAt} 경과). 워커가 건별로 {@link #expireOne} 호출한다. */

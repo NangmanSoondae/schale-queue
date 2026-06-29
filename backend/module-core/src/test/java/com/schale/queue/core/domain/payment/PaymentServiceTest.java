@@ -2,6 +2,7 @@ package com.schale.queue.core.domain.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.never;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
 import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * {@link PaymentService} 단위 테스트 — 확정/만료 전이와 멱등 가드(BDDMockito + AssertJ).
@@ -41,6 +44,7 @@ class PaymentServiceTest {
     @Mock private OrderItemRepository orderItemRepository;
     @Mock private StockService stockService;
     @Mock private PurchaseSlotRepository purchaseSlotRepository;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private PaymentService paymentService;
 
@@ -71,6 +75,8 @@ class PaymentServiceTest {
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(payment.getPaymentUid()).isEqualTo("SIM-" + ORDER_ID);
         assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.COMPLETED);
+        // 주문완료 이벤트 발행(ADR-002 후방 파이프라인)
+        then(eventPublisher).should().publishEvent(any(OrderCompletedEvent.class));
     }
 
     @Test
@@ -82,6 +88,7 @@ class PaymentServiceTest {
         assertThatThrownBy(() -> paymentService.confirm(ORDER_ID, null))
             .isInstanceOf(PaymentNotConfirmableException.class);
         then(stockService).should(never()).confirm(anyLong(), anyInt());
+        then(eventPublisher).should(never()).publishEvent(any(OrderCompletedEvent.class));
     }
 
     @Test
