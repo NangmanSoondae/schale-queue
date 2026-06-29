@@ -13,6 +13,7 @@ services:
     image: mariadb:10.6
     container_name: schale-mariadb
     restart: unless-stopped
+    mem_limit: 768m          # per-container 상한(No.07): 단일 컨테이너가 Docker VM 전체 메모리를 굶기지 못하게 격리
     ports:
       - "3306:3306"
     environment:
@@ -36,6 +37,7 @@ services:
     image: redis:7-alpine
     container_name: schale-redis
     restart: unless-stopped
+    mem_limit: 256m          # per-container 상한(No.07)
     ports:
       - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]   # AOF 영속화 활성
@@ -53,9 +55,13 @@ services:
     image: apache/kafka:3.9.0
     container_name: schale-kafka
     restart: unless-stopped
+    mem_limit: 1536m         # per-container 상한(No.07): JVM 힙(아래)+페이지캐시 여유 포함. VM 굶김 방지
     ports:
       - "9092:9092"
     environment:
+      # JVM 힙 상한 고정(No.07): 미지정 시 Kafka 기본(~1G)이지만 명시해 예측 가능하게 못박는다.
+      # 로컬 단일노드·소량 토픽엔 충분. 무제한 힙이 Docker Desktop VM 을 굶겨 크래시시키던 벡터를 제거.
+      KAFKA_HEAP_OPTS: "-Xmx768m -Xms256m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
@@ -71,10 +77,13 @@ services:
     volumes:
       - schale-kafka-data:/var/lib/kafka/data
     healthcheck:
+      # kafka-topics.sh 는 매 호출마다 JVM 을 풀 기동한다(수백 MB 순간 스파이크). 10s→30s 로 늦추고
+      # start_period 로 부팅 유예를 둬 반복 JVM 기동의 메모리 압박을 줄인다(No.07).
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
 volumes:
   schale-mariadb-data:
