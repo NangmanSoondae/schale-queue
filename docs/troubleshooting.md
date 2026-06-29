@@ -220,3 +220,38 @@ Started SchaleQueueWorkerApplication in 0.949 seconds ... BUILD SUCCESSFUL  (JVM
 
 ### 5) 결과 (Result)
 워커가 정상 부팅·상주하며 대기열을 소비했고, **입장률 ≈ 269 issues/s**(batch 50 / 200ms = 250/s 설계값, 목표 200~500 TPS 내)를 실측했다. 교훈: **단위 테스트만 있고 전체 컨텍스트 부팅을 한 번도 안 거친 모듈은 통합 결함이 잠복**한다. 부하 측정이 그 첫 부팅을 강제해 두 결함을 동시에 드러냈다(스키마 No.05 와 같은 교훈).
+
+## [No.07] Kafka 도입 후 Docker Desktop 간헐 크래시 → 자원 상한으로 안정화
+
+- **일자**: 2026-06-29
+- **관련 Phase**: Phase 4 (Kafka EDA)
+- **태그**: `#Docker` `#Kafka` `#인프라` `#안정성`
+
+### 1) 발견 (Discovery)
+UC-08(첫 Kafka 슬라이스)·S8(아웃박스) 두 차례에 걸쳐 **실 브로커 대상 live e2e 가 "Docker Desktop 반복 크래시"로 보류**됐다. 다만 본 진단 시점엔 스택이 6시간째 정상(`healthy`, kafka 재시작 0회)이라, 재현되는 상태가 아니라 **간헐적 VM 불안정**임을 확인했다.
+
+진단 결과(자원 구성):
+
+```
+KAFKA_HEAP_OPTS=            ← Kafka JVM 힙 상한 미지정(기본 ~1G, RSS 931MB)
+mem_limit 미설정 (kafka/mariadb/redis 모두) ← 각 컨테이너가 Docker VM 의 15.2GiB 전체를 볼 수 있음
+healthcheck: kafka-topics.sh / interval 10s ← 10초마다 JVM 풀 기동(수백 MB 순간 스파이크)
+```
+
+### 2) 분석 (Analysis)
+근본 원인은 **컨테이너 자원의 무제한 노출**이다. (1) JVM 기반 Kafka 브로커는 힙·페이지캐시가 늘 수 있는데 per-container `mem_limit` 가 없어, 어느 컨테이너든 부풀면 **Docker Desktop 의 WSL2 VM 메모리를 굶겨 VM 자체가 죽는다**(컨테이너 재시작이 아니라 데몬/VM 다운이라 "반복 크래시"로 체감됨). (2) 헬스체크가 10초마다 `kafka-topics.sh`로 **JVM 을 풀 기동**해 주기적 메모리 압박을 더한다. 즉 코드가 아니라 **인프라 자원 격리 부재** 문제.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — 브로커를 Redpanda 로 교체**: Kafka API 호환·경량(JVM 없음)이라 근본적이나, 인프라 스택 변경이라 범위가 크고 "Kafka 유지" 방침과 어긋남.
+- **방안 B — Docker Desktop 자체 길들이기(엔진 다운그레이드/WSL2 튜닝)**: 머신-로컬·토끼굴 위험, repo 로 공유 불가.
+- **방안 C — compose 에 자원 상한·경량 헬스체크 부여(채택)**: repo 에 커밋되어 모든 환경에 적용되고, 크래시 벡터(무제한 메모리)를 직접 차단한다. 변경 최소·코드 무영향.
+
+### 4) 해결 (Resolution)
+방안 C 채택 — `docker-compose.yml`:
+- **Kafka 힙 고정**: `KAFKA_HEAP_OPTS: "-Xmx768m -Xms256m"`.
+- **per-container `mem_limit`**: kafka `1536m` / mariadb `768m` / redis `256m` (총 ~2.5g 상한 → 호스트 여유 확보).
+- **헬스체크 경량화**: kafka `interval 10s→30s` + `start_period 40s`(반복 JVM 기동 1/3 로 감소).
+- (호스트 권고, 비커밋) Windows `~/.wslconfig` 로 WSL2 메모리를 호스트보다 낮게(예: 8GB) 캡해 OS 여유를 남길 것.
+
+### 5) 결과 (Result)
+하드닝 후 `docker compose up -d` 로 재생성 → **Kafka 10초 만에 `healthy`, 재시작 0**, 힙 상한(`-Xmx768m`) 반영 확인, 셋 다 `healthy`. 이어 **브로커 라운드트립 스모크**(앱 릴레이와 동일한 raw JSON 을 `order.completed` 에 produce → 동일 페이로드 consume)가 통과해, 그동안 미검증이던 **브로커 레벨 Kafka 경로가 처음으로 실증**됐다. 무제한 메모리 크래시 벡터를 제거했다(간헐 현상이라 "완전 근절"은 장기 관찰 필요 — 정직하게 명시). 앱 전체 e2e(api+worker 동시 기동→실 알림)는 별도 후속.
