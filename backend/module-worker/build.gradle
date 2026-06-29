@@ -17,10 +17,19 @@ dependencies {
     // 백그라운드 워커: 웹 계층 없이 Spring 컨텍스트만 기동
     implementation 'org.springframework.boot:spring-boot-starter'
 
+    // 영속성: Spring Data JPA — 워커가 core 의 JPA 리포지토리(아웃박스/멱등, 결제)를 '직접' 참조하므로
+    //  컴파일 클래스패스에 필요하다(core 는 data-jpa 를 implementation 으로 선언해 런타임만 전이됨, ADR-007).
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
     // 후방 이벤트 구독: Kafka consumer (ADR-002, 주문완료 → 알림 발송 UC-08)
     //  알림 게이트웨이 호출은 JDK 내장 HttpClient 를 써서 웹 서버 의존(tomcat) 없이 처리한다.
     implementation 'org.springframework.kafka:spring-kafka'
 
     // 알림 페이로드 JSON 직렬화(게이트웨이/웹훅 본문 — 한글·이모지 안전 인코딩). 버전은 Boot BOM 관리.
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // (ADR-007) 컨슈머의 JsonDeserializer 가 이벤트의 LocalDateTime(occurredAt)을 ISO 문자열에서
+    //  복원하려면 JavaTimeModule 이 클래스패스에 있어야 한다(없으면 역직렬화 실패). web/json 스타터가
+    //  없는 워커엔 jsr310 이 자동 포함되지 않으므로 명시 추가. 버전은 Boot BOM 관리.
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 }

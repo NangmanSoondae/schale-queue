@@ -3,16 +3,19 @@ package com.schale.queue.core.domain.payment;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
 import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
+import com.schale.queue.core.domain.outbox.EventOutbox;
+import com.schale.queue.core.domain.outbox.repository.EventOutboxRepository;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
 import com.schale.queue.core.domain.stock.StockService;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +38,8 @@ public class PaymentService {
     private final OrderItemRepository orderItemRepository;
     private final StockService stockService;
     private final PurchaseSlotRepository purchaseSlotRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final EventOutboxRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
     /**
      * 결제 확정(UC-06): {@code READY→PAID}, 재고 {@code reserved→sold}(P-S2), 주문 {@code COMPLETED}.
@@ -60,10 +64,23 @@ public class PaymentService {
             .orElseThrow(() -> new IllegalArgumentException("주문이 존재하지 않습니다. orderId=" + orderId));
         order.changeStatus(OrderStatus.COMPLETED);
 
-        // 주문 완료 이벤트 발행(ADR-002 후방 파이프라인). core 는 Kafka 비의존 — ApplicationEvent 로 발행하고,
-        // api 의 브리지가 트랜잭션 커밋 후 Kafka 로 내보낸다(AFTER_COMMIT). 컨슈머가 알림을 보낸다(UC-08).
-        eventPublisher.publishEvent(
-            OrderCompletedEvent.of(orderId, order.getMemberId(), order.getTotalAmount()));
+        // 주문 완료 이벤트를 '이 트랜잭션' 안에서 아웃박스에 기록한다(ADR-007 무유실). core 는 Kafka 비의존 —
+        // JSON 으로 직렬화해 행으로 남기고, 워커 릴레이가 PENDING 행을 읽어 Kafka 로 발행한다(UC-08 컨슈머).
+        // 주문 변경과 아웃박스 기록이 원자적으로 함께 커밋되므로, 커밋 후 발행 실패에도 이벤트가 유실되지 않는다.
+        OrderCompletedEvent event =
+            OrderCompletedEvent.of(orderId, order.getMemberId(), order.getTotalAmount());
+        outboxRepository.save(EventOutbox.pending(
+            event.eventId(), "ORDER", String.valueOf(orderId),
+            OrderCompletedEvent.TOPIC, String.valueOf(orderId), serialize(event)));
+    }
+
+    /** 이벤트를 아웃박스 payload(JSON)로 직렬화한다. 직렬화 실패는 결제 확정 전체를 롤백시킨다(정합성 우선). */
+    private String serialize(OrderCompletedEvent event) {
+        try {
+            return objectMapper.writeValueAsString(event);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("주문완료 이벤트 직렬화 실패 orderId=" + event.orderId(), e);
+        }
     }
 
     /** 만료 대상 주문 ID 목록(READY + {@code timeoutAt} 경과). 워커가 건별로 {@link #expireOne} 호출한다. */

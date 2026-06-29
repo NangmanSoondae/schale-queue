@@ -26,6 +26,9 @@ public record OrderCompletedEvent(
     LocalDateTime occurredAt
 ) {
 
+    /** 발행 대상 Kafka 토픽. 발행(아웃박스 릴레이)·구독(컨슈머)이 공유하는 단일 출처. */
+    public static final String TOPIC = "order.completed";
+
     public static OrderCompletedEvent of(Long orderId, Long memberId, Long totalAmount) {
         return new OrderCompletedEvent(UUID.randomUUID().toString(), orderId, memberId, totalAmount, LocalDateTime.now());
     }
