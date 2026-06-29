@@ -28,9 +28,14 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  # 후방 이벤트 구독(ADR-002, UC-08). order.completed 를 notification 그룹으로 읽어 알림을 보낸다.
+  # 후방 이벤트 발행/구독(ADR-002, UC-08 / ADR-007 아웃박스). 워커가 발행(릴레이)과 구독(알림)을 모두 담당한다.
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    # 발행: 아웃박스 릴레이가 직렬화된 JSON 문자열(payload)을 그대로 보낸다(범용 — 타입 비의존).
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all              # 무유실: 리더+ISR 복제 ack 까지 확인(릴레이 send().get() 과 함께 at-least-once)
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
@@ -38,6 +43,7 @@ spring:
       properties:
         spring.json.trusted.packages: "com.schale.queue.*"
         spring.json.value.default.type: com.schale.queue.core.domain.order.event.OrderCompletedEvent
+        spring.json.use.type.headers: false   # 릴레이가 보낸 raw JSON 엔 타입 헤더가 없으므로 default.type 사용
 
   # 결제 만료 정리(UC-07)용 DB. api 와 동일 스키마에 접속한다(민감 값은 외부 주입).
   datasource:
@@ -59,3 +65,5 @@ schale:
       batch-size: 50        # tick·상품당 최대 입장 인원 (기본값 ≈ 상품당 250 TPS)
   payment:
     expiry-interval: 10s    # 결제 만료 정리 주기 (@Scheduled fixedDelay, UC-07)
+  outbox:
+    relay-interval: 500ms   # 아웃박스 PENDING 폴링→Kafka 발행 주기 (@Scheduled fixedDelay, ADR-007)

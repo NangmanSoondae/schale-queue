@@ -34,12 +34,8 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  # 후방 이벤트 발행(ADR-002). 주문완료 이벤트를 JSON 으로 직렬화해 order.completed 토픽에 보낸다.
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  # (ADR-007) 이벤트 발행은 워커 아웃박스 릴레이로 이전. api 는 confirm() 트랜잭션에서 event_outbox 행만
+  # 남기므로 Kafka producer 설정이 필요 없다(api 는 Kafka 비의존). 실제 발행 설정은 module-worker 에 있다.
 
 server:
   port: ${SERVER_PORT:8080}

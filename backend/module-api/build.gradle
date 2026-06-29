@@ -18,8 +18,8 @@ dependencies {
     // 관측성: Actuator — JVM 스레드/메모리 등 런타임 지표 노출(§9.3.6). 부하 중 VT vs 플랫폼 계측에 사용.
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // 후방 이벤트 발행: Kafka producer (ADR-002, 주문완료 이벤트 발행)
-    implementation 'org.springframework.kafka:spring-kafka'
+    // (ADR-007) 이벤트 발행 책임을 워커 아웃박스 릴레이로 이전 → api 는 Kafka 비의존으로 복귀.
+    //  api 는 confirm() 트랜잭션에서 아웃박스 행만 남기고(core), 실제 Kafka 발행은 module-worker 가 담당한다.
 
     // API 문서화: Springdoc OpenAPI (Swagger UI)
     //  버전 근거(§5.4.2): 2.8.x 라인은 Spring Boot 3.4 / Spring Framework 6.2 타깃,

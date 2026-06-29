@@ -17,6 +17,10 @@ dependencies {
     // 영속성: Spring Data JPA
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
+    // 아웃박스 이벤트 직렬화(ADR-007): ObjectMapper 로 이벤트→JSON. Kafka 비의존(순수 JSON).
+    //  버전은 Boot BOM 관리. 실제 빈은 각 실행 모듈(api/worker)의 Boot 자동구성 ObjectMapper 가 주입된다.
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
     // 인메모리: Redis (대기열 / 분산 락 / 캐시 — Phase 3 본격 사용)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
