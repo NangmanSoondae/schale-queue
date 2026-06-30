@@ -106,3 +106,32 @@ docker compose down
 ```
 
 > 인프라(2)가 정상 기동되지 않은 상태에서 백엔드(3)를 실행하면 DB/Redis 연결 실패가 발생한다. 항상 인프라를 먼저 띄운다.
+
+## 4.5. 풀스택 컨테이너 실행 (Phase 5 통합 배포)
+
+개발 중엔 위(4.4)처럼 인프라만 컨테이너로 띄우고 앱은 `bootRun` 으로 실행하는 것이 빠르다. 반면 **전체 시스템을 한 번에** 띄워 데모하거나 통합 동작을 확인할 땐, `app` 프로파일로 api·worker 까지 컨테이너로 묶어 기동한다.
+
+```bash
+# 인프라만 (기본) — bootRun 개발 흐름. 앱은 호스트에서 localhost 로 접속
+docker compose up -d
+
+# 풀스택 — 인프라 + api + worker 컨테이너까지 (최초/소스 변경 시 --build)
+docker compose --profile app up -d --build
+
+# 상태/로그
+docker compose --profile app ps
+docker compose --profile app logs -f api worker
+
+# 종료 (데이터 volume 보존)
+docker compose --profile app down
+```
+
+### 동작 원리
+
+- **프로파일 분리**: `api`/`worker` 서비스에 `profiles: ["app"]` 이 붙어 있어, `--profile app` 없이는 기동되지 않는다(기존 인프라-only 흐름 보존).
+- **컨테이너 간 접속**: 컨테이너 앱은 `localhost` 가 아니라 **service 명**으로 인프라에 접속한다 — `mariadb:3306`, `redis:6379`, `kafka:29092`.
+- **Kafka 듀얼 리스너**: 브로커가 호스트용(`localhost:9092`)과 내부용(`kafka:29092`) 두 리스너를 노출한다. 호스트의 `bootRun`/부하툴은 `9092`, 컨테이너는 `29092` 로 **같은 브로커**에 접속한다.
+- **기동 순서**: api/worker 는 `depends_on: condition: service_healthy` 로 인프라 healthcheck 통과 후에야 뜬다(부팅 레이스 차단).
+- **시크릿**: `DB_PASSWORD` 등은 이미지에 굽지 않고 `.env` 에서 런타임 주입한다(§5.3.2). 실행 전 `cp .env.example .env` 후 값을 채운다.
+
+> ⚠️ **이미지 캐시**: 소스를 바꾼 뒤엔 `--build` 를 붙여야 새 코드가 반영된다. 안 붙이면 이전 이미지로 뜬다.

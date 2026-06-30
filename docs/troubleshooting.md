@@ -338,3 +338,33 @@ MariaDB 컨테이너의 `docker-entrypoint-initdb.d/schema.sql` 은 **데이터 
 
 ### 5) 결과 (Result)
 수정 후 e2e 재현: 만료 임박 결제가 즉시 만료 대상으로 잡혀 **`결제 만료 정리 1건` → 주문 CANCELLED·결제 EXPIRED·재고 해제 → 취소 이벤트 아웃박스(SENT) → `주문취소 이벤트 수신`** 까지 한 사이클이 흘렀다. 시간 의존 로직은 반드시 **단일 Clock 출처**로 통일해야 함을 확인. (잔여: 이벤트 occurredAt·감사 컬럼의 시스템존 now() 는 비교에 쓰이지 않는 표시값이라 현 범위 밖.)
+
+## [No.11] 풀스택 컨테이너화 — 호스트 포트 충돌 + Kafka 듀얼 리스너 + 컨테이너 내 알림 게이트웨이
+
+- **일자**: 2026-06-30
+- **관련 Phase**: Phase 5 (앱 컨테이너화 + compose 통합 e2e 중 발견)
+- **태그**: `#Docker` `#compose` `#Kafka리스너` `#포트충돌` `#통합배포`
+
+### 1) 발견 (Discovery)
+`docker compose --profile app up --build` 로 풀스택을 띄우자 이미지 빌드·인프라·worker 는 모두 정상이었으나 **api 컨테이너만 기동 실패**:
+```
+Error response from daemon: ... Bind for 0.0.0.0:8080 failed: port is already allocated
+```
+
+### 2) 분석 (Analysis)
+세 가지가 얽혀 있었다.
+- **(가) 호스트 8080 충돌**: 별도 레포인 `notify-gateway` 컨테이너(ADR-003)가 이미 호스트 8080 을 점유 중이었다. compose 의 api 포트 매핑이 `8080:8080` 고정이라 충돌.
+- **(나) Kafka 리스너**: 기존 브로커는 `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092` 단일이라, compose 네트워크 내부 컨테이너(worker)가 `localhost:9092` 로는 **자기 자신**을 가리켜 브로커에 닿지 못한다(호스트 bootRun 전용 주소였음).
+- **(다) 컨테이너 내 알림**: worker 컨테이너에서 `NOTIFY_GATEWAY_URL=http://localhost:8080` 은 호스트의 notify-gateway 가 아니라 **worker 컨테이너 자신**을 가리켜 `ConnectException` 발생.
+
+### 3) 고찰 (Contemplation)
+- (가) api 의 **호스트 포트와 컨테이너 내부 포트를 분리**한다. 내부는 8080 고정, 호스트 노출은 `API_PORT`(기본 8080)로 오버라이드 가능하게 → 충돌 환경에서 코드/이미지 변경 없이 회피.
+- (나) 브로커에 **듀얼 리스너**를 둔다: 호스트용 `PLAINTEXT(localhost:9092)` + 내부용 `INTERNAL(kafka:29092)`. 호스트 도구는 9092, 컨테이너는 29092 로 **같은 브로커**에 접속.
+- (다) 알림 실패는 `NotifyGatewayClient` 가 **흡수(폴백 후 건너뜀)**해 작업 흐름에 무영향이라 슬라이스 차단 사유 아님. 컨테이너에서 호스트 게이트웨이를 쓰려면 `host.docker.internal` 또는 게이트웨이를 같은 네트워크 service 로 두는 것이 정석(ADR-003 후속 범위).
+
+### 4) 해결 (Resolution)
+- compose api: `ports: ["${API_PORT:-8080}:8080"]`, 컨테이너 `SERVER_PORT: 8080` 고정. `.env.example` 에 `API_PORT` 키·설명 추가.
+- compose kafka: `KAFKA_LISTENERS` 에 `INTERNAL://:29092` 추가, `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092,INTERNAL://kafka:29092`, `KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL`, 보안맵에 `INTERNAL:PLAINTEXT`. worker 는 `KAFKA_BOOTSTRAP=kafka:29092` 주입.
+
+### 5) 결과 (Result)
+`API_PORT=8081` 로 api 재기동 → 5개 컨테이너 모두 healthy, api `/actuator/health` 200. worker 가 `kafka:29092`(INTERNAL)로 접속해 `settlement`·`notification` 두 컨슈머 그룹 파티션 할당 완료. 브로커에 실제 `order.completed` 이벤트를 발행하니 **브로커 → 컨테이너 worker → 컨테이너 MariaDB** 로 관통, `settlement` 행(gross 50000 / fee 1500 / net 48500 / PENDING_PAYOUT) 생성 확인. 컨테이너 환경에서 호스트 포트 충돌·브로커 주소 가시성이 로컬 단일노드와 다르다는 점을 못박았다(잔여: 컨테이너↔호스트 알림 게이트웨이 연결은 ADR-003 후속).
