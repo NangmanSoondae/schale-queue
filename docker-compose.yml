@@ -63,11 +63,14 @@ services:
       KAFKA_HEAP_OPTS: "-Xmx768m -Xms256m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # 듀얼 리스너(Phase 5): 호스트(bootRun/부하툴)는 PLAINTEXT(localhost:9092),
+      # compose 네트워크 내부 컨테이너(api/worker)는 INTERNAL(kafka:29092)로 같은 브로커에 접속한다.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -83,6 +86,73 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
+
+  # ==========================================================================
+  #  애플리케이션 (Phase 5 통합 배포) — profile 'app' 으로 분리.
+  #   · 기본 `docker compose up`        → 인프라(mariadb/redis/kafka)만 (bootRun 개발 흐름 보존)
+  #   · `docker compose --profile app up --build` → 위 인프라 + api + worker 풀스택
+  #   · 컨테이너 앱은 service 명으로 인프라에 접속(localhost 아님): mariadb / redis / kafka:29092
+  #   · 시크릿(DB_PASSWORD 등)은 .env 로만 주입(§5.3.2). 이미지에 굽지 않는다.
+  # ==========================================================================
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: backend/module-api/Dockerfile
+    container_name: schale-api
+    restart: unless-stopped
+    mem_limit: 768m          # per-container 상한(No.07 일관성)
+    ports:
+      # 호스트:컨테이너. 컨테이너 내부는 항상 8080. 호스트 포트는 API_PORT 로 오버라이드 가능
+      # (예: 8080 을 다른 서비스 — notify-gateway 등 — 가 점유 중이면 .env 에 API_PORT=8081).
+      - "${API_PORT:-8080}:8080"
+    environment:
+      DB_URL: jdbc:mariadb://mariadb:3306/${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8080      # 컨테이너 내부 리슨 포트(고정). 호스트 노출은 위 API_PORT 가 결정
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # api 는 actuator health 를 노출(application.yml). JRE 이미지엔 curl 이 없어 JVM 내장 수단 대신
+      # busybox wget 도 없으므로, bash /dev/tcp 로 포트 개방을 확인한다(경량·의존성 0).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo ok >&3 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: backend/module-worker/Dockerfile
+    container_name: schale-worker
+    restart: unless-stopped
+    mem_limit: 768m          # per-container 상한(No.07 일관성)
+    environment:
+      DB_URL: jdbc:mariadb://mariadb:3306/${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      KAFKA_BOOTSTRAP: kafka:29092      # 컨테이너 내부는 INTERNAL 리스너로 접속
+      # 알림 게이트웨이/웹훅은 선택값(미설정 시 워커가 발송 건너뜀, NotifyGatewayClient). .env 가 있으면 전달된다.
+      NOTIFY_GATEWAY_URL: ${NOTIFY_GATEWAY_URL:-}
+      NOTIFY_GATEWAY_API_KEY: ${NOTIFY_GATEWAY_API_KEY:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
 
 volumes:
   schale-mariadb-data:
