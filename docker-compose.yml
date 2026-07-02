@@ -118,10 +118,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # 종료 시 SIGKILL 유예. 앱의 graceful shutdown 상한(20s, application.yml)보다 길게 잡는다.
+    stop_grace_period: 30s
     healthcheck:
-      # api 는 actuator health 를 노출(application.yml). JRE 이미지엔 curl 이 없어 JVM 내장 수단 대신
-      # busybox wget 도 없으므로, bash /dev/tcp 로 포트 개방을 확인한다(경량·의존성 0).
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo ok >&3 || exit 1"]
+      # actuator /health 를 bash /dev/tcp 로 직접 GET 해 "status":"UP" 을 확인한다(curl/wget 불필요).
+      # 주의: CMD-SHELL 은 /bin/sh(이 이미지에선 dash)로 실행돼 bash 전용 /dev/tcp 가 항상 실패했다
+      # (거짓 unhealthy, troubleshooting No.12) → bash 를 명시 호출하는 CMD 배열로 교체.
+      # TCP 연결 확인이 아닌 HTTP 응답 검사라 DB 다운 등 실질 장애도 unhealthy 로 잡는다.
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /actuator/health HTTP/1.0\r\n\r\n" >&3 && grep -q "\"status\":\"UP\"" <&3']
       interval: 15s
       timeout: 5s
       retries: 5
@@ -146,6 +150,8 @@ services:
       NOTIFY_GATEWAY_URL: ${NOTIFY_GATEWAY_URL:-}
       NOTIFY_GATEWAY_API_KEY: ${NOTIFY_GATEWAY_API_KEY:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+    # 종료 시 SIGKILL 유예. 진행 중 릴레이 배치/결제 만료 정리(lifecycle 20s)가 끝날 시간을 준다.
+    stop_grace_period: 30s
     depends_on:
       mariadb:
         condition: service_healthy

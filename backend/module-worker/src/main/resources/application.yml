@@ -18,6 +18,11 @@ spring:
     web-application-type: none
     keep-alive: true
 
+  # 종료 시 진행 중인 리스너/스케줄러 작업(아웃박스 릴레이 배치, 결제 만료 정리)이 마무리될 시간을 준다.
+  # compose 의 stop_grace_period(30s)보다 짧게 잡아 SIGKILL 전에 정상 종료가 끝나게 한다.
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
   # Java 21 Virtual Threads 활성화 (docs/2_architecture.md 전략 1)
   threads:
     virtual:
@@ -38,9 +43,16 @@ spring:
       acks: all              # 무유실: 리더+ISR 복제 ack 까지 확인(릴레이 send().get() 과 함께 at-least-once)
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      auto-offset-reset: latest
+      # 역직렬화 실패(포이즌 필)를 예외가 아닌 '실패 레코드'로 리스너 컨테이너에 넘긴다.
+      # 맨 JsonDeserializer 는 poll() 내부에서 터져 같은 오프셋을 무한 재폴링(파티션 영구 정지)하므로
+      # ErrorHandlingDeserializer 로 감싸 에러 핸들러(KafkaConsumerConfig → DLT)가 처리하게 한다.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      # earliest: 신규 컨슈머 그룹(또는 오프셋 만료)이 그룹 조인 전에 발행된 이벤트를 건너뛰지 않게 한다.
+      # (#21 정산 그룹 추가 때 latest 로 인해 기존 이벤트가 스킵되는 시나리오를 실제로 겪음.)
+      # 모든 컨슈머가 processed_event 멱등 가드를 갖춰 과거 이벤트 재소비도 안전하다(ADR-007).
+      auto-offset-reset: earliest
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: "com.schale.queue.*"
         spring.json.use.type.headers: false   # 릴레이가 보낸 raw JSON 엔 타입 헤더가 없음
         # 역직렬화 대상 타입은 토픽마다 달라(주문완료/취소) 리스너별 @KafkaListener(properties=...)로 지정한다.
