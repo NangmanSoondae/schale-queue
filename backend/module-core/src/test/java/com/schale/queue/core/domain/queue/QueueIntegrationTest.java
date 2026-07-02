@@ -172,14 +172,16 @@ class QueueIntegrationTest {
             java.util.stream.LongStream.rangeClosed(1, memberCount).boxed().toList());
     }
 
-    // --- 대기열 소비 (dequeue / 활성 레지스트리) ----------------------------
+    // --- 대기열 소비 (dequeueAndAdmit / 활성 레지스트리) ---------------------
 
     @Test
-    @DisplayName("P-Q4: dequeue 는 선착순 맨 앞에서 batch 만큼 꺼내고 큐에서 제거한다")
-    void dequeue_admits_in_fifo_order_and_respects_batch() {
+    @DisplayName("P-Q4+P-Q3: 소비는 선착순 batch 만큼 꺼내며, 같은 원자 연산에서 입장 토큰까지 발급한다")
+    void dequeue_admits_in_fifo_order_and_issues_tokens_atomically() {
         // given — 1 → 2 → 3 순서로 진입
         AdjustableClock clock = new AdjustableClock(Instant.parse("2026-06-24T00:00:00Z"));
-        QueueService queue = new QueueService(redis, clock, new QueueProperties());
+        QueueProperties props = new QueueProperties();
+        QueueService queue = new QueueService(redis, clock, props);
+        AdmissionTokenService tokens = new AdmissionTokenService(redis, props);
         queue.enqueue(GOODS, 1L);
         clock.advance(Duration.ofSeconds(1));
         queue.enqueue(GOODS, 2L);
@@ -187,20 +189,47 @@ class QueueIntegrationTest {
         queue.enqueue(GOODS, 3L);
 
         // when — 앞에서 2명 소비
-        assertThat(queue.dequeue(GOODS, 2)).containsExactly(1L, 2L);
+        QueueService.AdmitResult first = queue.dequeueAndAdmit(GOODS, 2);
 
-        // then — 꺼낸 2명은 큐에서 빠지고, 3번이 맨 앞으로
+        // then — 꺼낸 2명은 큐에서 빠지고 '즉시' 유효한 토큰을 보유한다(pop↔발급 사이 중간 상태 없음)
+        assertThat(first.members()).containsExactly(1L, 2L);
+        assertThat(first.issued()).isEqualTo(2L);
+        assertThat(tokens.hasValidToken(GOODS, 1L)).isTrue();
+        assertThat(tokens.hasValidToken(GOODS, 2L)).isTrue();
+        assertThat(tokens.hasValidToken(GOODS, 3L)).as("아직 대기 중인 3번은 토큰이 없다").isFalse();
         assertThat(queue.size(GOODS)).isEqualTo(1L);
         assertThat(queue.getPosition(GOODS, 1L)).isEmpty();
         assertThat(queue.getPosition(GOODS, 3L)).hasValue(1L);
 
-        // and — 남은 1명보다 많이 요청해도 있는 만큼만(3번) 반환
-        assertThat(queue.dequeue(GOODS, 5)).containsExactly(3L);
+        // and — 남은 1명보다 많이 요청해도 있는 만큼만(3번) 소비·발급
+        QueueService.AdmitResult second = queue.dequeueAndAdmit(GOODS, 5);
+        assertThat(second.members()).containsExactly(3L);
+        assertThat(tokens.hasValidToken(GOODS, 3L)).isTrue();
         assertThat(queue.size(GOODS)).isZero();
     }
 
     @Test
-    @DisplayName("활성 레지스트리: enqueue 가 등록하고, 큐가 비면 dequeue 가 레지스트리·시퀀스를 정리한다")
+    @DisplayName("P-Q3 고정창: 유효 토큰 보유자가 재진입해 다시 소비되어도 기존 TTL 이 보존된다(SET NX)")
+    void readmission_preserves_existing_token_ttl() {
+        // given — 1번이 입장해 토큰을 보유한 상태에서 다시 줄을 선다
+        QueueService queue = new QueueService(redis, Clock.systemUTC(), new QueueProperties());
+        queue.enqueue(GOODS, 1L);
+        assertThat(queue.dequeueAndAdmit(GOODS, 1).issued()).isEqualTo(1L);
+        Long ttlBefore = redis.getExpire(QueueKeys.admission(GOODS, 1L), TimeUnit.MILLISECONDS);
+        queue.enqueue(GOODS, 1L);
+
+        // when — 재진입자를 다시 소비
+        QueueService.AdmitResult result = queue.dequeueAndAdmit(GOODS, 1);
+
+        // then — 소비는 되지만 신규 발급은 0 (기존 토큰의 고정창이 연장되지 않음)
+        assertThat(result.members()).containsExactly(1L);
+        assertThat(result.issued()).as("기존 유효 토큰이 있으면 새로 발급하지 않는다").isZero();
+        Long ttlAfter = redis.getExpire(QueueKeys.admission(GOODS, 1L), TimeUnit.MILLISECONDS);
+        assertThat(ttlAfter).as("TTL 이 재설정(연장)되지 않아야 한다").isLessThanOrEqualTo(ttlBefore);
+    }
+
+    @Test
+    @DisplayName("활성 레지스트리: enqueue 가 등록하고, 큐가 비면 소비가 레지스트리·시퀀스를 정리한다")
     void dequeue_cleans_active_registry_and_sequence_when_drained() {
         // given — 진입하면 활성 큐 목록에 등록된다
         QueueService queue = new QueueService(redis, Clock.systemUTC(), new QueueProperties());
@@ -209,7 +238,7 @@ class QueueIntegrationTest {
         assertThat(redis.hasKey(QueueKeys.sequence(GOODS))).isTrue();
 
         // when — 마지막 1명까지 모두 소비
-        assertThat(queue.dequeue(GOODS, 10)).containsExactly(1L);
+        assertThat(queue.dequeueAndAdmit(GOODS, 10).members()).containsExactly(1L);
 
         // then — 큐가 비었으므로 활성 레지스트리에서 빠지고 시퀀스 카운터도 정리된다
         assertThat(queue.activeGoods()).doesNotContain(GOODS);
@@ -218,26 +247,27 @@ class QueueIntegrationTest {
     }
 
     @Test
-    @DisplayName("빈 큐 dequeue 는 빈 목록을 반환한다(부작용 없음)")
+    @DisplayName("빈 큐 소비는 빈 결과를 반환한다(부작용 없음)")
     void dequeue_on_empty_queue_returns_empty() {
         QueueService queue = new QueueService(redis, Clock.systemUTC(), new QueueProperties());
-        assertThat(queue.dequeue(GOODS, 5)).isEmpty();
+        assertThat(queue.dequeueAndAdmit(GOODS, 5).members()).isEmpty();
         assertThat(queue.activeGoods()).doesNotContain(GOODS);
     }
 
     // --- 입장 토큰 (AdmissionTokenService) ----------------------------------
 
     @Test
-    @DisplayName("P-Q3/P-O1: 입장 토큰 발급 후 유효하며, 회수하면 무효가 된다")
+    @DisplayName("P-Q3/P-O1: 입장(소비)으로 발급된 토큰은 유효하며, 회수하면 무효가 된다")
     void admission_token_issue_validate_revoke() {
-        // given — TTL 5분짜리 토큰 서비스
+        // given — 대기열 통과로 토큰을 발급받는다(발급 경로는 dequeueAndAdmit 하나뿐)
         QueueProperties props = new QueueProperties();
-        props.setAdmissionTtl(Duration.ofMinutes(5));
+        QueueService queue = new QueueService(redis, Clock.systemUTC(), props);
         AdmissionTokenService tokens = new AdmissionTokenService(redis, props);
-
-        // when / then — 발급 전엔 무효, 발급 후 유효, 회수 후 다시 무효
         assertThat(tokens.hasValidToken(GOODS, 1L)).isFalse();
-        tokens.issue(GOODS, 1L);
+        queue.enqueue(GOODS, 1L);
+        queue.dequeueAndAdmit(GOODS, 1);
+
+        // when / then — 발급 후 유효, 회수 후 다시 무효
         assertThat(tokens.hasValidToken(GOODS, 1L)).isTrue();
         assertThat(tokens.revoke(GOODS, 1L)).isTrue();
         assertThat(tokens.hasValidToken(GOODS, 1L)).isFalse();
@@ -247,13 +277,15 @@ class QueueIntegrationTest {
     @Test
     @DisplayName("P-Q3: 입장 토큰은 TTL 이 지나면 자동으로 만료된다")
     void admission_token_expires_after_ttl() {
-        // given — TTL 1초 짜리 토큰
+        // given — TTL 1초 짜리 대기열로 입장해 토큰을 발급받는다
         QueueProperties props = new QueueProperties();
         props.setAdmissionTtl(Duration.ofSeconds(1));
+        QueueService queue = new QueueService(redis, Clock.systemUTC(), props);
         AdmissionTokenService tokens = new AdmissionTokenService(redis, props);
+        queue.enqueue(GOODS, 1L);
+        queue.dequeueAndAdmit(GOODS, 1);
 
         // when — 발급 직후엔 유효 (1초 창이라 단언 직전 만료될 여지가 없음)
-        tokens.issue(GOODS, 1L);
         assertThat(tokens.hasValidToken(GOODS, 1L)).isTrue();
 
         // then — TTL 경과 후 자동 만료. 고정 sleep 대신 폴링으로 대기해

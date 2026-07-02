@@ -92,7 +92,7 @@ class QueueSseStreamIT {
     }
 
     @Test
-    @DisplayName("enqueue→dequeue+issue 경로에서 position 이벤트 뒤 admitted 이벤트가 나가고 스트림이 종료된다")
+    @DisplayName("enqueue→dequeueAndAdmit 경로에서 position 이벤트 뒤 admitted 이벤트가 나가고 스트림이 종료된다")
     void streams_position_then_admitted_over_real_redis() {
         // given — 회원이 대기열에 진입(맨 앞, 순번 1)
         assertThat(queueService.enqueue(GOODS, MEMBER)).isTrue();
@@ -113,10 +113,10 @@ class QueueSseStreamIT {
         assertThat(emitter.completed).isFalse();
         assertThat(registry.size()).isEqualTo(1);
 
-        // when ② Worker 가 하는 일을 그대로 재현: dequeue 로 꺼내고 입장 토큰 발급.
-        List<Long> admitted = queueService.dequeue(GOODS, 50);
-        assertThat(admitted).containsExactly(MEMBER);
-        admitted.forEach(memberId -> assertThat(admissionService.issue(GOODS, memberId)).isTrue());
+        // when ② Worker 가 하는 일을 그대로 재현: 원자 소비+토큰 발급 한 번.
+        QueueService.AdmitResult admitted = queueService.dequeueAndAdmit(GOODS, 50);
+        assertThat(admitted.members()).containsExactly(MEMBER);
+        assertThat(admitted.issued()).isEqualTo(1L);
 
         // and 다음 폴링 tick.
         streamService.broadcast();
