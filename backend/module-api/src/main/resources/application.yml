@@ -15,6 +15,11 @@ spring:
     virtual:
       enabled: true
 
+  # graceful 종료 단계 상한(server.shutdown 참조). compose 의 stop_grace_period(30s)보다 짧게 —
+  # SIGKILL 전에 정상 종료가 끝나게 한다.
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
   datasource:
     url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
     username: ${DB_USERNAME:schale}
@@ -43,6 +48,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # 종료 시 신규 요청은 거부하고 진행 중 요청(주문 생성: 재고 예약~아웃박스 커밋)을 마무리한 뒤 내린다.
+  # 즉시 종료는 커밋 여부 불명의 connection reset 을 사용자에게 남긴다(2026-07-02 리뷰 M9).
+  shutdown: graceful
 
 # 관측성(§9.3.6). 부하 중 JVM 스레드/메모리 계측용으로 metrics 엔드포인트만 노출(로컬 한정).
 management:

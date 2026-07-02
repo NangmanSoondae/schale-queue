@@ -31,4 +31,6 @@ RUN useradd --system --uid 10001 schale
 COPY --from=build /workspace/backend/module-api/build/libs/*.jar app.jar
 USER schale
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# 컨테이너 인지 힙 설정: 기본 ergonomics 는 힙을 mem_limit 의 ~25%(768m→~192MB)로 잡아 부하 시
+# GC 스래싱을 유발한다(2026-07-02 리뷰 M9). cgroup 한도의 75%를 힙 상한으로 사용.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:InitialRAMPercentage=50.0", "-jar", "/app/app.jar"]

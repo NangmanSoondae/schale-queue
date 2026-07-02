@@ -368,3 +368,33 @@ Error response from daemon: ... Bind for 0.0.0.0:8080 failed: port is already al
 
 ### 5) 결과 (Result)
 `API_PORT=8081` 로 api 재기동 → 5개 컨테이너 모두 healthy, api `/actuator/health` 200. worker 가 `kafka:29092`(INTERNAL)로 접속해 `settlement`·`notification` 두 컨슈머 그룹 파티션 할당 완료. 브로커에 실제 `order.completed` 이벤트를 발행하니 **브로커 → 컨테이너 worker → 컨테이너 MariaDB** 로 관통, `settlement` 행(gross 50000 / fee 1500 / net 48500 / PENDING_PAYOUT) 생성 확인. 컨테이너 환경에서 호스트 포트 충돌·브로커 주소 가시성이 로컬 단일노드와 다르다는 점을 못박았다(잔여: 컨테이너↔호스트 알림 게이트웨이 연결은 ADR-003 후속).
+
+## [No.12] api 컨테이너가 항상 unhealthy — CMD-SHELL 은 bash 가 아니라 dash 로 실행된다
+
+- **일자**: 2026-07-02
+- **관련 Phase**: Phase 5 (#22 검증 중 증상 관찰, 2026-07-02 전체 리뷰에서 원인 확정)
+- **태그**: `#Docker` `#healthcheck` `#dash` `#devtcp` `#거짓음성`
+
+### 1) 발견 (Discovery)
+#22 풀스택 검증에서 api 는 `/actuator/health` 200 으로 분명 정상인데 `docker compose ps` 는 **항상 `unhealthy`** 로 표시했다(거짓 음성). 앱 자체 문제가 아니라 헬스체크 결함으로 보고 후속 항목으로 미뤄뒀다가, 전체 리뷰(인프라 영역)에서 원인이 확정됐다.
+
+### 2) 분석 (Analysis)
+헬스체크는 `test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && ..."]` 였다. 함정은 두 겹:
+- `CMD-SHELL` 은 **`/bin/sh -c`** 로 실행되는데, `eclipse-temurin:21-jre`(Ubuntu 기반)의 `/bin/sh` 는 **dash** 다.
+- `/dev/tcp/...` 는 파일시스템에 실존하지 않는 **bash 전용 가상 경로**라, dash 는 이를 실제 파일로 열려다 ENOENT 로 항상 실패한다.
+
+원 주석은 "JRE 이미지엔 curl 이 없어 … bash /dev/tcp 로 확인" 이라 적었지만 정작 bash 로 실행되지 않았다(자기모순). 참고로 이 이미지는 Ubuntu 기반이라 **bash 자체는 `/bin/bash` 에 존재**한다 — 문제는 bash 부재가 아니라 `CMD-SHELL` 이 bash 를 부르지 않는다는 점.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — curl 설치 후 HTTP 체크**: 정석이지만 run 스테이지에 apt 레이어(+이미지 크기) 추가.
+- **방안 B — `CMD` 배열로 bash 명시 호출 + TCP 연결만 확인**: 의존성 0 이지만 포트 개방 = 건강이 아니다(DB 다운이어도 Tomcat 포트는 열려 있음 — 거짓 양성).
+- **방안 C — bash /dev/tcp 로 actuator 를 직접 HTTP GET(채택)**: bash 를 명시 호출하되 포트 확인에 그치지 않고 `GET /actuator/health` 요청을 써 넣고 응답의 `"status":"UP"` 을 grep 한다. 의존성 0 + 실질 건강 검사(방안 A 의 효과)를 동시에.
+
+### 4) 해결 (Resolution)
+```yaml
+test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /actuator/health HTTP/1.0\r\n\r\n" >&3 && grep -q "\"status\":\"UP\"" <&3']
+```
+`CMD` 배열이 bash 를 직접 실행하므로 `/dev/tcp` 가 동작하고, HTTP/1.0 요청이라 Host 헤더 없이 응답 후 연결이 닫혀 grep 이 EOF 까지 읽는다. DB 다운 시 actuator 가 503 `{"status":"DOWN"}` 을 주므로 실질 장애도 unhealthy 로 잡힌다.
+
+### 5) 결과 (Result)
+`docker compose config` 파싱 통과. 교훈: **`CMD-SHELL` 의 셸은 이미지의 `/bin/sh` 이며 그것이 bash 라는 보장은 어디에도 없다.** bash 확장(`/dev/tcp`, `[[ ]]`, 프로세스 치환)을 헬스체크에 쓰려면 반드시 `["CMD", "bash", "-c", ...]` 로 명시 호출할 것. (컨테이너 재기동 검증은 슬라이스 3 의 CI docker build 잡과 다음 풀스택 e2e 에서 수행.)

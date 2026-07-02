@@ -26,4 +26,5 @@ WORKDIR /app
 RUN useradd --system --uid 10001 schale
 COPY --from=build /workspace/backend/module-worker/build/libs/*.jar app.jar
 USER schale
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# 컨테이너 인지 힙 설정: 기본 ergonomics 는 힙을 mem_limit 의 ~25%로 잡는다(api Dockerfile 참조).
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:InitialRAMPercentage=50.0", "-jar", "/app/app.jar"]
