@@ -105,7 +105,7 @@ class PaymentLifecycleConcurrencyTest {
         executor.submit(() -> {
             try {
                 start.await();
-                paymentService.confirm(orderId, null);
+                paymentService.confirm(orderId, null, null);   // memberId=null → 내부 호출(소유권 검증 생략)
             } catch (Exception ignored) {
                 // 만료가 이겼다면 PaymentNotConfirmableException — 정상 경합 결과
             } finally {

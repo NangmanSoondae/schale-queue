@@ -67,13 +67,13 @@ public class Stock extends BaseTimeEntity {
     /**
      * 주문 생성 시 재고를 예약한다(P-S2). {@code available-- , reserved++}.
      *
-     * @throws IllegalArgumentException 수량이 0 이하인 경우
-     * @throws IllegalStateException    가용 재고가 부족한 경우(초과 판매 방지, P-S1)
+     * @throws IllegalArgumentException    수량이 0 이하인 경우
+     * @throws InsufficientStockException  가용 재고가 부족한 경우(초과 판매 방지, P-S1 — 정상 품절 거부)
      */
     public void reserve(int quantity) {
         requirePositive(quantity);
         if (this.availableQuantity < quantity) {
-            throw new IllegalStateException(
+            throw new InsufficientStockException(
                 "잔여 재고가 부족합니다. available=" + this.availableQuantity + ", request=" + quantity);
         }
         this.availableQuantity -= quantity;

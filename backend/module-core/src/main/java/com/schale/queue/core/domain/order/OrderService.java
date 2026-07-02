@@ -1,7 +1,10 @@
 package com.schale.queue.core.domain.order;
 
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.goods.Goods;
+import com.schale.queue.core.domain.goods.SaleNotOpenException;
 import com.schale.queue.core.domain.goods.repository.GoodsRepository;
+import com.schale.queue.core.domain.stock.InsufficientStockException;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
 import com.schale.queue.core.domain.order.repository.PurchaseSlotRepository;
@@ -63,17 +66,25 @@ public class OrderService {
      * @param goodsId  주문 상품 ID
      * @param quantity 주문 수량(양수)
      * @return 생성된 주문(PENDING)
-     * @throws IllegalArgumentException        재고 또는 상품이 존재하지 않는 경우
-     * @throws IllegalStateException           잔여 재고가 부족한 경우(초과 판매 방지)
+     * @throws NotFoundException                재고 또는 상품이 존재하지 않는 경우
+     * @throws SaleNotOpenException             판매 시작(openAt) 이전의 주문 시도(UC-02)
+     * @throws InsufficientStockException       잔여 재고가 부족한 경우(초과 판매 방지)
      * @throws PurchaseLimitExceededException   1인 구매 한도(P-O3)를 초과하거나 활성 주문이 이미 있는 경우
      */
     @Transactional
     public Order createOrder(Long memberId, Long goodsId, int quantity) {
         // ① 상품 조회(단가 스냅샷 + 1인 한도 설정).
         Goods goods = goodsRepository.findById(goodsId)
-            .orElseThrow(() -> new IllegalArgumentException("상품이 존재하지 않습니다. goodsId=" + goodsId));
+            .orElseThrow(() -> new NotFoundException("상품이 존재하지 않습니다. goodsId=" + goodsId));
 
-        // ② 1인 구매 한도 수량 검사(P-O3). null=무제한. 재고 차감 전에 빠르게 거른다.
+        // ①-1 판매 시작 게이트(UC-02, 리뷰 M5). 대기열 진입(QueueController)에서 걸렀어도, 진입 시점과
+        //     주문 시점이 다르고 진입 게이트는 우회 가능(API 직접 호출)하므로 확정 지점에서 재검사한다.
+        if (LocalDateTime.now(clock).isBefore(goods.getOpenAt())) {
+            throw new SaleNotOpenException(
+                "판매 시작 전입니다. goodsId=" + goodsId + ", openAt=" + goods.getOpenAt());
+        }
+
+        // ② 1인 구매 한도 수량 검사(P-O3). null=무제한(레거시 행). 재고 차감 전에 빠르게 거른다.
         Integer maxPerMember = goods.getMaxPurchasePerMember();
         if (maxPerMember != null && quantity > maxPerMember) {
             throw new PurchaseLimitExceededException(

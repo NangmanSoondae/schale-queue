@@ -10,6 +10,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
@@ -77,7 +78,7 @@ class PaymentServiceTest {
         given(objectMapper.writeValueAsString(any(OrderCompletedEvent.class)))
             .willReturn("{\"orderId\":100}");
 
-        paymentService.confirm(ORDER_ID, null);
+        paymentService.confirm(ORDER_ID, MEMBER_ID, null);
 
         then(stockService).should().confirm(GOODS_ID, QTY);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
@@ -102,11 +103,35 @@ class PaymentServiceTest {
     void confirm_rejects_when_not_ready() {
         given(paymentRepository.findByOrderIdWithPessimisticLock(ORDER_ID))
             .willReturn(Optional.of(payment(PaymentStatus.PAID)));
+        given(orderRepository.findById(ORDER_ID)).willReturn(Optional.of(order()));
 
-        assertThatThrownBy(() -> paymentService.confirm(ORDER_ID, null))
+        assertThatThrownBy(() -> paymentService.confirm(ORDER_ID, MEMBER_ID, null))
             .isInstanceOf(PaymentNotConfirmableException.class);
         then(stockService).should(never()).confirm(anyLong(), anyInt());
         then(outboxRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("확정 소유권(H3): 요청 회원이 주문 소유자가 아니면 NotFoundException(존재 은닉), 어떤 전이도 없다")
+    void confirm_rejects_when_not_owner() {
+        given(paymentRepository.findByOrderIdWithPessimisticLock(ORDER_ID))
+            .willReturn(Optional.of(payment(PaymentStatus.READY)));
+        given(orderRepository.findById(ORDER_ID)).willReturn(Optional.of(order()));   // 소유자 = MEMBER_ID(42)
+
+        assertThatThrownBy(() -> paymentService.confirm(ORDER_ID, 777L, null))
+            .isInstanceOf(NotFoundException.class);
+        then(stockService).should(never()).confirm(anyLong(), anyInt());
+        then(outboxRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("확정: 결제가 존재하지 않으면 NotFoundException(404 매핑)")
+    void confirm_rejects_when_payment_missing() {
+        given(paymentRepository.findByOrderIdWithPessimisticLock(ORDER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> paymentService.confirm(ORDER_ID, MEMBER_ID, null))
+            .isInstanceOf(NotFoundException.class);
+        then(stockService).should(never()).confirm(anyLong(), anyInt());
     }
 
     @Test

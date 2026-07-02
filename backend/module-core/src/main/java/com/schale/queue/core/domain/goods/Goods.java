@@ -46,8 +46,13 @@ public class Goods extends BaseTimeEntity {
     private LocalDateTime openAt;
 
     /**
-     * 1인 구매 한도(P-O3). 회원의 해당 상품 활성(예약+확정) 수량이 이 값을 넘을 수 없다.
-     * {@code null} 이면 무제한, 기본 1. "변경 적은 설정 메타정보"라 Stock 이 아닌 Goods 에 둔다(ADR-001 §2).
+     * 1인 구매 한도(P-O3, 기본 1). 회원의 해당 상품 활성(예약+확정) 수량이 이 값을 넘을 수 없다.
+     * "변경 적은 설정 메타정보"라 Stock 이 아닌 Goods 에 둔다(ADR-001 §2).
+     *
+     * <p>DB 컬럼 기본값(1)은 Hibernate 가 INSERT 에 항상 컬럼을 포함해 적용되지 않으므로
+     * (값 생략 시 NULL=무제한 저장 — 문서상 "기본 1"의 정반대, 2026-07-02 리뷰 M6),
+     * 빌더에서 미지정을 1 로 강제한다. 레거시 NULL 행은 무제한으로 읽히며(호출측 null 가드 유지),
+     * 진짜 무제한 상품이 필요해지면 구매 슬롯 정책(1인 1활성주문) 재설계와 함께 도입한다.
      */
     @Column(name = "max_purchase_per_member")
     private Integer maxPurchasePerMember;
@@ -58,6 +63,6 @@ public class Goods extends BaseTimeEntity {
         this.description = description;
         this.price = price;
         this.openAt = openAt;
-        this.maxPurchasePerMember = maxPurchasePerMember;
+        this.maxPurchasePerMember = maxPurchasePerMember != null ? maxPurchasePerMember : 1;
     }
 }

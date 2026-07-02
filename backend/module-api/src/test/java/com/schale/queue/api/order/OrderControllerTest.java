@@ -11,8 +11,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schale.queue.api.order.dto.OrderResponse;
+import com.schale.queue.core.domain.NotFoundException;
+import com.schale.queue.core.domain.goods.SaleNotOpenException;
 import com.schale.queue.core.domain.order.OrderStatus;
 import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
+import com.schale.queue.core.domain.stock.InsufficientStockException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,9 +83,9 @@ class OrderControllerTest {
     @Test
     @DisplayName("재고 부족은 409 Conflict 와 STOCK_CONFLICT 코드를 반환한다")
     void create_returns_409_when_out_of_stock() throws Exception {
-        // given
+        // given — 품절은 전용 예외로만 표현된다(리뷰 M3 — 범용 IllegalStateException 매핑 제거)
         given(orderFacade.placeOrder(eq(42L), eq(1L), anyInt()))
-            .willThrow(new IllegalStateException("잔여 재고가 부족합니다."));
+            .willThrow(new InsufficientStockException("잔여 재고가 부족합니다."));
         String body = objectMapper.writeValueAsString(new TestRequest(1L, 1));
 
         // when & then
@@ -92,6 +95,78 @@ class OrderControllerTest {
                 .content(body))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("STOCK_CONFLICT"));
+    }
+
+    @Test
+    @DisplayName("판매 시작 전 주문은 409 SALE_NOT_OPEN 을 반환한다(UC-02)")
+    void create_returns_409_before_sale_opens() throws Exception {
+        given(orderFacade.placeOrder(eq(42L), eq(1L), anyInt()))
+            .willThrow(new SaleNotOpenException("판매 시작 전입니다. goodsId=1"));
+        String body = objectMapper.writeValueAsString(new TestRequest(1L, 1));
+
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, 42L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("SALE_NOT_OPEN"));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 상품 주문은 404 NOT_FOUND 를 반환한다(과거 400 — REST 시맨틱 교정)")
+    void create_returns_404_for_unknown_goods() throws Exception {
+        given(orderFacade.placeOrder(eq(42L), eq(999L), anyInt()))
+            .willThrow(new NotFoundException("상품이 존재하지 않습니다. goodsId=999"));
+        String body = objectMapper.writeValueAsString(new TestRequest(999L, 1));
+
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, 42L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("깨진 JSON 본문도 ErrorResponse 계약(400 MALFORMED_BODY)으로 응답한다(리뷰 M4)")
+    void create_returns_400_on_malformed_json() throws Exception {
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, 42L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{not-json"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("MALFORMED_BODY"));
+        then(orderFacade).should(never()).placeOrder(eq(42L), eq(1L), anyInt());
+    }
+
+    @Test
+    @DisplayName("숫자가 아닌 X-Member-Id 도 ErrorResponse 계약(400 INVALID_TYPE)으로 응답한다(리뷰 M4)")
+    void create_returns_400_on_non_numeric_member_header() throws Exception {
+        String body = objectMapper.writeValueAsString(new TestRequest(1L, 1));
+
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, "abc")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_TYPE"));
+    }
+
+    @Test
+    @DisplayName("매핑되지 않은 예외(인프라 장애)는 내부를 노출하지 않는 500 INTERNAL_ERROR 로 응답한다(리뷰 M4)")
+    void create_returns_500_on_unexpected_error() throws Exception {
+        given(orderFacade.placeOrder(eq(42L), eq(1L), anyInt()))
+            .willThrow(new RuntimeException("DB 커넥션 풀 고갈 — 내부 상세 메시지"));
+        String body = objectMapper.writeValueAsString(new TestRequest(1L, 1));
+
+        mockMvc.perform(post("/api/v1/orders")
+                .header(MEMBER_HEADER, 42L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+            // 내부 메시지(커넥션 풀 등)가 응답에 새지 않아야 한다(§5.3.2)
+            .andExpect(jsonPath("$.message").value("일시적인 서버 오류입니다. 잠시 후 다시 시도해 주세요."));
     }
 
     @Test

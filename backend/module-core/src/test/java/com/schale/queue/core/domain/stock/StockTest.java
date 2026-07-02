@@ -57,8 +57,9 @@ class StockTest {
     void reserve_rejects_when_insufficient_available() {
         Stock stock = fresh(5);
 
+        // 품절은 전용 예외(리뷰 M3 — 시스템 오류용 IllegalStateException 과 분리)
         assertThatThrownBy(() -> stock.reserve(6))
-            .isInstanceOf(IllegalStateException.class)
+            .isInstanceOf(InsufficientStockException.class)
             .hasMessageContaining("잔여 재고가 부족");
         assertThat(stock.getAvailableQuantity()).isEqualTo(5);
         assertThat(stock.getReservedQuantity()).isZero();

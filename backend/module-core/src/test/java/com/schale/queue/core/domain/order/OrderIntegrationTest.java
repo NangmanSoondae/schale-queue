@@ -105,7 +105,8 @@ class OrderIntegrationTest {
         Goods goods = goodsRepository.save(Goods.builder()
             .name("블루 아카이브 한정판 굿즈")
             .price(UNIT_PRICE)
-            .openAt(LocalDateTime.now(clock))
+            .openAt(LocalDateTime.now(clock).minusMinutes(1))   // 판매 중(openAt 게이트 통과, UC-02)
+            .maxPurchasePerMember(10)                            // 빌더 기본값(1, M6)과 무관하게 수량 검증
             .build());
         goodsId = goods.getId();
 

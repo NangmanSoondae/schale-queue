@@ -1,6 +1,7 @@
 package com.schale.queue.api.queue;
 
 import com.schale.queue.api.queue.dto.QueuePositionResponse;
+import com.schale.queue.core.domain.goods.GoodsService;
 import com.schale.queue.core.domain.queue.QueueService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -29,16 +30,21 @@ public class QueueController {
 
     private final QueueService queueService;
     private final QueueStreamService queueStreamService;
+    private final GoodsService goodsService;
 
     @Operation(
         summary = "대기열 진입",
-        description = "상품 대기열에 진입하고 현재 순번을 반환한다(P-Q1 FIFO). 이미 대기 중이면 기존 순번을 유지한다(P-Q2)."
+        description = "상품 대기열에 진입하고 현재 순번을 반환한다(P-Q1 FIFO). 이미 대기 중이면 기존 순번을 유지한다(P-Q2). "
+            + "상품이 없으면 404, 판매 시작(openAt) 전이면 409."
     )
     @PostMapping("/{goodsId}/entries")
     public ResponseEntity<QueuePositionResponse> enter(
         @PathVariable Long goodsId,
         @RequestHeader("X-Member-Id") Long memberId
     ) {
+        // 판매 시작 게이트(UC-02, 리뷰 M5). 대기열(Redis) 도메인은 Goods(DB) 에 결합시키지 않고
+        // 게이트를 앞단에서 통과시킨다. 존재하지 않는 goodsId 의 큐 영구 잔류도 함께 차단.
+        goodsService.checkSaleOpen(goodsId);
         queueService.enqueue(goodsId, memberId);
         long position = queueService.getPosition(goodsId, memberId).orElse(0L);
         long waiting = queueService.size(goodsId);

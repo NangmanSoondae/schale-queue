@@ -1,5 +1,6 @@
 package com.schale.queue.core.domain.stock;
 
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.stock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,8 +23,8 @@ public class StockService {
     /**
      * 주문 생성 시 재고를 예약한다(P-S2, {@code available-- reserved++}).
      *
-     * @throws IllegalArgumentException 해당 상품의 재고가 없는 경우
-     * @throws IllegalStateException    가용 재고가 부족한 경우(초과 판매 방지)
+     * @throws NotFoundException            해당 상품의 재고가 없는 경우
+     * @throws InsufficientStockException   가용 재고가 부족한 경우(초과 판매 방지)
      */
     @Transactional
     public void reserve(Long goodsId, int quantity) {
@@ -50,6 +51,6 @@ public class StockService {
 
     private Stock lockedStock(Long goodsId) {
         return stockRepository.findByGoodsIdWithPessimisticLock(goodsId)
-            .orElseThrow(() -> new IllegalArgumentException("재고가 존재하지 않습니다. goodsId=" + goodsId));
+            .orElseThrow(() -> new NotFoundException("재고가 존재하지 않습니다. goodsId=" + goodsId));
     }
 }

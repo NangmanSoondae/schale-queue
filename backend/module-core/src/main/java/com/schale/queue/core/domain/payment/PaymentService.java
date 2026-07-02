@@ -1,10 +1,11 @@
 package com.schale.queue.core.domain.payment;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderItem;
 import com.schale.queue.core.domain.order.OrderStatus;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.schale.queue.core.domain.order.event.OrderCancelledEvent;
 import com.schale.queue.core.domain.order.event.OrderCompletedEvent;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
@@ -17,6 +18,7 @@ import com.schale.queue.core.domain.stock.StockService;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 보고 확정은 거부·만료는 무시(no-op)한다 → 중복 호출/경합에도 카운터가 이중 이동하지 않는다(P-P2).
  * 락 순서는 항상 <b>결제 → 재고</b> 라 데드락이 없다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PaymentService {
@@ -45,13 +48,25 @@ public class PaymentService {
     /**
      * 결제 확정(UC-06): {@code READY→PAID}, 재고 {@code reserved→sold}(P-S2), 주문 {@code COMPLETED}.
      *
-     * @throws IllegalArgumentException        결제/주문이 존재하지 않는 경우
+     * <p><b>소유권 검증(리뷰 H3).</b> 주문 ID 는 순차값이라 추측 가능하다 — 요청 회원이 주문의
+     * 소유자인지 확인하고, 불일치면 존재 여부를 숨기기 위해 '없음'과 같은 {@link NotFoundException}
+     * 으로 거부한다(ID 열거로 타인 주문을 강제 확정하는 공격 차단).
+     *
+     * @param memberId 요청 회원(소유권 검증 대상). {@code null} 이면 내부 호출로 간주해 검증을 생략한다.
+     * @throws NotFoundException               결제/주문이 없거나 요청 회원의 소유가 아닌 경우
      * @throws PaymentNotConfirmableException  결제가 READY 가 아닌 경우(이미 확정/만료 — 멱등)
      */
     @Transactional
-    public void confirm(Long orderId, String approvalUid) {
+    public void confirm(Long orderId, Long memberId, String approvalUid) {
         Payment payment = paymentRepository.findByOrderIdWithPessimisticLock(orderId)
-            .orElseThrow(() -> new IllegalArgumentException("결제가 존재하지 않습니다. orderId=" + orderId));
+            .orElseThrow(() -> new NotFoundException("결제가 존재하지 않습니다. orderId=" + orderId));
+        Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new NotFoundException("주문이 존재하지 않습니다. orderId=" + orderId));
+        if (memberId != null && !memberId.equals(order.getMemberId())) {
+            log.warn("결제 확정 소유권 불일치 orderId={} owner={} requester={}",
+                orderId, order.getMemberId(), memberId);
+            throw new NotFoundException("결제가 존재하지 않습니다. orderId=" + orderId);
+        }
         if (payment.getStatus() != PaymentStatus.READY) {
             throw new PaymentNotConfirmableException(
                 "결제를 확정할 수 없는 상태입니다. status=" + payment.getStatus());
@@ -61,8 +76,6 @@ public class PaymentService {
             stockService.confirm(item.getGoodsId(), item.getQuantity());   // reserved→sold
         }
         payment.approve(approvalUid != null ? approvalUid : "SIM-" + orderId);
-        Order order = orderRepository.findById(orderId)
-            .orElseThrow(() -> new IllegalArgumentException("주문이 존재하지 않습니다. orderId=" + orderId));
         order.changeStatus(OrderStatus.COMPLETED);
 
         // 주문 완료 이벤트를 '이 트랜잭션' 안에서 아웃박스에 기록한다(ADR-007 무유실). core 는 Kafka 비의존 —
