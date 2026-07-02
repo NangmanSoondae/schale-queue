@@ -39,6 +39,14 @@ public final class QueueKeys {
 
     /** 입장 토큰 키(P-Q3 규약 {@code admission:{goodsId}:{memberId}}). */
     public static String admission(Long goodsId, Long memberId) {
-        return "admission:" + goodsId + ":" + memberId;
+        return admissionPrefix(goodsId) + memberId;
+    }
+
+    /**
+     * 입장 토큰 키 프리픽스({@code admission:{goodsId}:}). dequeue Lua 스크립트가 꺼낸 memberId 를
+     * 이어 붙여 토큰 키를 만들 때 사용한다(pop+발급 원자화 — QueueService.DEQUEUE_ADMIT_SCRIPT).
+     */
+    public static String admissionPrefix(Long goodsId) {
+        return "admission:" + goodsId + ":";
     }
 }
