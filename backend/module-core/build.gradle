@@ -35,5 +35,9 @@ dependencies {
     // 동시성 통합 테스트(StockConcurrencyTest)는 실제 MariaDB(InnoDB)에서 비관적 락 거동을
     // 증명한다. 로컬 환경의 Docker Engine 버전과 Testcontainers(docker-java) 간 API 비호환으로
     // (troubleshooting No.03 참조) Testcontainers 대신 docker-compose 로 띄운 MariaDB 에 직접 접속하며,
-    // RUN_DB_IT=true 환경변수가 있을 때만 실행되도록 게이팅한다.
+    // RUN_DB_IT=true 환경변수가 있을 때만 실행되도록 게이팅한다. CI 는 services 컨테이너로 상시 실행(#25).
+
+    // 테스트 컨텍스트의 ObjectMapper 빈(CoreTestApplication)이 이벤트 LocalDateTime(occurredAt)을
+    // ISO 문자열로 직렬화하는 데 필요(아웃박스 직렬화 경로 — 워커 JacksonConfig 와 동일 규약).
+    testImplementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 }

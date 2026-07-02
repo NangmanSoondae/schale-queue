@@ -19,6 +19,7 @@ import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
 import com.schale.queue.core.domain.stock.Stock;
 import com.schale.queue.core.domain.stock.repository.StockRepository;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -77,6 +78,11 @@ class OrderIntegrationTest {
     @MockitoSpyBean
     private PaymentRepository paymentRepository;
 
+    // 시간 비교는 서비스와 '같은 시간 출처'(UTC Clock 빈)를 써야 한다. 시스템존 now()(KST)로 기대값을
+    // 만들면 UTC 로 저장된 timeoutAt 과 ~9h 어긋나 KST 호스트에서만 실패한다(troubleshooting No.10 부류).
+    @Autowired
+    private Clock clock;
+
     private static final long UNIT_PRICE = 19_000L;
     private static final int INITIAL_STOCK = 100;
 
@@ -99,7 +105,7 @@ class OrderIntegrationTest {
         Goods goods = goodsRepository.save(Goods.builder()
             .name("블루 아카이브 한정판 굿즈")
             .price(UNIT_PRICE)
-            .openAt(LocalDateTime.now())
+            .openAt(LocalDateTime.now(clock))
             .build());
         goodsId = goods.getId();
 
@@ -132,7 +138,7 @@ class OrderIntegrationTest {
         // given — 재고 100개, 3개 주문 (총액 57,000원)
         int quantity = 3;
         long expectedTotal = UNIT_PRICE * quantity;
-        LocalDateTime before = LocalDateTime.now();
+        LocalDateTime before = LocalDateTime.now(clock);
 
         // when
         Order created = orderService.createOrder(memberId, goodsId, quantity);

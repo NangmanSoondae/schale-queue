@@ -1,8 +1,15 @@
 name: CI
 
-# PR(→main)·main push 에서 빌드 + 전체 테스트로 머지 게이트를 강제한다.
-# 시크릿 불필요: 인프라 의존 통합 테스트(RUN_DB_IT / RUN_REDIS_IT)는 환경변수 미설정으로 자동 skip 되고,
-# 단위·슬라이스(@WebMvcTest) 테스트만 실행되므로 외부 자격증명 없이 통과한다.
+# PR(→main)·main push 에서 빌드 + 전체 테스트로 머지 게이트를 강제한다(§5.3.5).
+#
+# 인프라 의존 통합 테스트(RUN_DB_IT / RUN_REDIS_IT)도 services 컨테이너(MariaDB/Redis)로 '상시' 실행한다.
+# 과거엔 미설정으로 자동 skip 됐는데, 그 결과 이 프로젝트의 핵심 주장(비관적 락 오버셀 0 —
+# StockConcurrencyTest)이 머지 게이트의 보호를 받지 못했다(2026-07-02 리뷰 H5): 락을 지우는
+# 리그레션도 CI 그린으로 머지될 수 있었다. services 는 GitHub 호스티드 러너 내장이라 시크릿이
+# 필요 없고, 접속 정보는 테스트 yml 의 로컬 플레이스홀더 기본값(schale/schale)과 일치시킨다.
+#
+# docker-build 잡은 컨테이너 이미지·compose 정의의 회귀(COPY 경로, 헬스체크 문법 등 —
+# troubleshooting No.12 부류)를 배포 시점이 아닌 머지 게이트에서 잡는다.
 on:
   pull_request:
     branches: [main]
@@ -21,6 +28,39 @@ jobs:
   build:
     name: build & test (JDK 21)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # 통합 테스트용 실제 인프라. 로컬 docker-compose 와 같은 이미지 버전을 사용한다.
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_ROOT_PASSWORD: root          # CI 일회용 컨테이너 전용 플레이스홀더(§5.3.2 실제 시크릿 아님)
+          MARIADB_DATABASE: schale_queue
+          MARIADB_USER: schale
+          MARIADB_PASSWORD: schale             # 테스트 yml 기본값(TEST_DB_PASSWORD:schale)과 일치
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      RUN_DB_IT: "true"     # 동시성 IT(StockConcurrency 등) + 워커 컨텍스트 부팅 스모크 활성화
+      RUN_REDIS_IT: "true"  # 대기열/SSE IT 활성화
+      DB_PASSWORD: schale   # 워커 컨텍스트 IT 용(기본값 없는 필수 주입값 — CI 컨테이너 플레이스홀더)
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,5 +72,26 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      - name: Build & test
+      - name: Build & test (통합 테스트 포함)
         run: ./gradlew build --no-daemon --stacktrace
+
+      # 레드 CI 를 로컬 재현 없이 진단할 수 있게, 실패 시에만 테스트 리포트를 남긴다.
+      - name: Upload test reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: backend/**/build/reports/tests/
+          retention-days: 7
+
+  docker-build:
+    name: docker image build (api·worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 이미지 빌드 가능성만 검증한다(런타임 env 불필요 — compose 의 ${VAR} 는 컨테이너 실행 시 주입값).
+      - name: Build images via compose
+        run: docker compose --profile app build

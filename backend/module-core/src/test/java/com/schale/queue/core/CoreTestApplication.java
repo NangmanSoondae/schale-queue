@@ -1,6 +1,11 @@
 package com.schale.queue.core;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
 
 /**
  * module-core 통합 테스트 전용 부트 애플리케이션.
@@ -14,4 +19,20 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  */
 @SpringBootApplication
 public class CoreTestApplication {
+
+    /**
+     * {@code PaymentService}(아웃박스 직렬화, ADR-007)가 요구하는 ObjectMapper.
+     *
+     * <p>spring-web 이 없는 컨텍스트에선 Boot 의 Jackson 자동구성이 ObjectMapper 빈을 만들지 않아
+     * (Jackson2ObjectMapperBuilder 가 spring-web 클래스 — troubleshooting No.08 과 동일 기전)
+     * 컨텍스트 부팅이 실패한다. 워커의 {@code JacksonConfig} 와 같은 규약(JavaTimeModule + ISO 문자열)
+     * 으로 명시 제공한다. CI 가 DB IT 를 상시 실행하게 되면서(#25) 비로소 드러난 잠복 결함.
+     */
+    @Bean
+    public ObjectMapper objectMapper() {
+        return JsonMapper.builder()
+            .addModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .build();
+    }
 }
