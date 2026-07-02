@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.stock.repository.StockRepository;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -79,12 +80,12 @@ class StockServiceTest {
     }
 
     @Test
-    @DisplayName("재고가 존재하지 않으면 IllegalArgumentException 을 던진다")
+    @DisplayName("재고가 존재하지 않으면 NotFoundException 을 던진다(404 매핑, 리뷰 M3)")
     void reserve_throws_when_stock_not_found() {
         given(stockRepository.findByGoodsIdWithPessimisticLock(999L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> stockService.reserve(999L, 1))
-            .isInstanceOf(IllegalArgumentException.class)
+            .isInstanceOf(NotFoundException.class)
             .hasMessageContaining("재고가 존재하지 않습니다");
     }
 }

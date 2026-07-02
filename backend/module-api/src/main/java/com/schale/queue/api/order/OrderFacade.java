@@ -1,10 +1,13 @@
 package com.schale.queue.api.order;
 
 import com.schale.queue.api.order.dto.OrderResponse;
+import com.schale.queue.core.domain.NotFoundException;
+import com.schale.queue.core.domain.goods.SaleNotOpenException;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderService;
 import com.schale.queue.core.domain.order.PurchaseLimitExceededException;
 import com.schale.queue.core.domain.queue.AdmissionTokenService;
+import com.schale.queue.core.domain.stock.InsufficientStockException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -21,10 +24,11 @@ import org.springframework.stereotype.Component;
  *
  * <p><b>실패 보상.</b> 토큰을 소비한 뒤 주문이 실패하면:
  * <ul>
- *   <li><b>비즈니스 거부</b>(품절·잘못된 요청 = {@link IllegalStateException}/{@link IllegalArgumentException}):
+ *   <li><b>비즈니스 거부</b>(품절·판매 전·한도 초과·자원 없음·잘못된 요청 — 전용 도메인 예외):
  *       정당하게 입장 턴을 쓴 것으로 보고 <b>토큰을 소진된 채로 둔다</b>.</li>
- *   <li><b>시스템 오류</b>(DB/Redis 장애 등 그 외): 사용자 책임이 아니므로 토큰을
- *       <b>best-effort 재발급</b>해 재진입을 면제한다.</li>
+ *   <li><b>시스템 오류</b>(DB/Redis 장애, 직렬화 실패 등 그 외): 사용자 책임이 아니므로 토큰을
+ *       <b>best-effort 재발급</b>해 재진입을 면제한다. 과거엔 {@code IllegalStateException} 전부를
+ *       비즈니스 거부로 취급해 아웃박스 직렬화 실패 같은 시스템 오류에도 토큰을 소각했다(리뷰 M3).</li>
  * </ul>
  */
 @Slf4j
@@ -59,10 +63,12 @@ public class OrderFacade {
         }
     }
 
-    /** 도메인이 입력/상태/한도 위반에 던지는 예외만 비즈니스 거부로 분류하고, 그 외는 시스템 오류로 본다. */
+    /** 도메인 전용 거부 예외(품절/판매 전/한도/자원 없음)와 입력 오류만 비즈니스 거부, 그 외는 시스템 오류. */
     private boolean isSystemError(RuntimeException e) {
         return !(e instanceof IllegalArgumentException
-            || e instanceof IllegalStateException
+            || e instanceof InsufficientStockException
+            || e instanceof SaleNotOpenException
+            || e instanceof NotFoundException
             || e instanceof PurchaseLimitExceededException);
     }
 

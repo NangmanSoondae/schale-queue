@@ -3,6 +3,7 @@ package com.schale.queue.api.queue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -10,6 +11,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.schale.queue.core.domain.NotFoundException;
+import com.schale.queue.core.domain.goods.GoodsService;
+import com.schale.queue.core.domain.goods.SaleNotOpenException;
 import com.schale.queue.core.domain.queue.QueueService;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +41,10 @@ class QueueControllerTest {
     @MockitoBean
     private QueueStreamService queueStreamService;
 
+    // 판매 시작 게이트(UC-02). 기본 목은 아무것도 던지지 않음 = 게이트 통과.
+    @MockitoBean
+    private GoodsService goodsService;
+
     @Test
     @DisplayName("대기열 진입은 201 Created 와 현재 순번/대기 인원을 반환한다")
     void enter_returns_201_with_position() throws Exception {
@@ -59,6 +67,30 @@ class QueueControllerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("MISSING_HEADER"));
         then(queueService).should(never()).enqueue(eq(1L), eq(42L));
+    }
+
+    @Test
+    @DisplayName("판매 시작(openAt) 전 진입은 409 SALE_NOT_OPEN 으로 거부되고 큐에 넣지 않는다(UC-02)")
+    void enter_returns_409_before_sale_opens() throws Exception {
+        willThrow(new SaleNotOpenException("판매 시작 전입니다. goodsId=1"))
+            .given(goodsService).checkSaleOpen(1L);
+
+        mockMvc.perform(post("/api/v1/queue/1/entries").header(MEMBER_HEADER, 42L))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("SALE_NOT_OPEN"));
+        then(queueService).should(never()).enqueue(eq(1L), eq(42L));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 상품 진입은 404 NOT_FOUND 로 거부된다(고아 큐 방지)")
+    void enter_returns_404_for_unknown_goods() throws Exception {
+        willThrow(new NotFoundException("상품이 존재하지 않습니다. goodsId=999"))
+            .given(goodsService).checkSaleOpen(999L);
+
+        mockMvc.perform(post("/api/v1/queue/999/entries").header(MEMBER_HEADER, 42L))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        then(queueService).should(never()).enqueue(eq(999L), eq(42L));
     }
 
     @Test

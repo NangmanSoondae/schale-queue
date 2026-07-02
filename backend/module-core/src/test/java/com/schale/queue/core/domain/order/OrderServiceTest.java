@@ -10,7 +10,9 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 
+import com.schale.queue.core.domain.NotFoundException;
 import com.schale.queue.core.domain.goods.Goods;
+import com.schale.queue.core.domain.goods.SaleNotOpenException;
 import com.schale.queue.core.domain.goods.repository.GoodsRepository;
 import com.schale.queue.core.domain.order.repository.OrderItemRepository;
 import com.schale.queue.core.domain.order.repository.OrderRepository;
@@ -84,10 +86,12 @@ class OrderServiceTest {
         long unitPrice = 19_000L;
         long expectedTotal = unitPrice * quantity;
 
+        // openAt 은 고정 Clock 기준 과거(판매 중), 한도는 수량보다 크게 명시(빌더 기본값이 1 이 됨 — M6)
         Goods goods = Goods.builder()
             .name("블루 아카이브 한정판 굿즈")
             .price(unitPrice)
-            .openAt(LocalDateTime.now())
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .maxPurchasePerMember(5)
             .build();
         given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
         // 저장된 주문에는 PK 가 부여되어 항목/결제가 이를 참조한다(영속성 흉내).
@@ -140,20 +144,73 @@ class OrderServiceTest {
     @Test
     @DisplayName("주문 수량이 1인 구매 한도를 넘으면 재고 차감 전에 한도 초과로 거부한다(P-O3)")
     void createOrder_rejects_when_quantity_exceeds_purchase_limit() {
-        // given — 1인 한도 2개 상품에 3개 주문 시도
+        // given — 1인 한도 2개 상품(판매 중)에 3개 주문 시도
         long goodsId = 10L;
         Goods goods = Goods.builder()
             .name("한정 굿즈")
             .price(19_000L)
-            .openAt(LocalDateTime.now())
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
             .maxPurchasePerMember(2)
             .build();
         given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
 
         // when & then — 한도 초과 예외, 재고는 손대지 않는다(fail-fast)
         assertThatThrownBy(() -> orderService.createOrder(1L, goodsId, 3))
             .isInstanceOf(PurchaseLimitExceededException.class);
         then(stockService).should(never()).reserve(anyLong(), anyInt());
         then(orderRepository).should(never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("판매 시작(openAt) 전 주문은 SaleNotOpenException 으로 거부한다(UC-02, 리뷰 M5)")
+    void createOrder_rejects_before_sale_opens() {
+        // given — openAt 이 고정 Clock 기준 1분 뒤(아직 판매 전)
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).plusMinutes(1))
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+
+        // when & then — 재고에 손대기 전에 거부된다(선착순 출발선)
+        assertThatThrownBy(() -> orderService.createOrder(1L, goodsId, 1))
+            .isInstanceOf(SaleNotOpenException.class);
+        then(stockService).should(never()).reserve(anyLong(), anyInt());
+        then(orderRepository).should(never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 상품 주문은 NotFoundException 으로 거부한다(404 매핑, 리뷰 M3)")
+    void createOrder_rejects_unknown_goods() {
+        given(goodsRepository.findById(999L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.createOrder(1L, 999L, 1))
+            .isInstanceOf(NotFoundException.class);
+        then(stockService).should(never()).reserve(anyLong(), anyInt());
+    }
+
+    @Test
+    @DisplayName("한도 미지정 상품은 기본 1(P-O3) — 2개 주문은 거부된다(리뷰 M6)")
+    void createOrder_defaults_purchase_limit_to_one() {
+        // given — maxPurchasePerMember 미지정 (과거엔 null=무제한으로 저장되던 결함)
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+
+        // when & then
+        assertThatThrownBy(() -> orderService.createOrder(1L, goodsId, 2))
+            .isInstanceOf(PurchaseLimitExceededException.class);
+        then(stockService).should(never()).reserve(anyLong(), anyInt());
     }
 }

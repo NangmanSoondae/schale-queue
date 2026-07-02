@@ -59,6 +59,10 @@ class PurchaseLimitConcurrencyTest {
     private PaymentRepository paymentRepository;
     @Autowired
     private PurchaseSlotRepository purchaseSlotRepository;
+    // openAt 은 서비스의 판매 시작 게이트(UC-02)와 같은 시간 출처(UTC Clock)로 만들어야 한다.
+    // 시스템존 now()(KST)로 만들면 UTC 기준 미래가 되어 전 주문이 SALE_NOT_OPEN 으로 거부된다(No.10 부류).
+    @Autowired
+    private java.time.Clock clock;
 
     private Long memberId;
     private Long goodsId;
@@ -70,7 +74,7 @@ class PurchaseLimitConcurrencyTest {
             .email("sensei@schale.gg").password("hashed").name("선생").role(Role.USER).build()).getId();
         // 1인 한도 1건. 재고는 충분(100)히 둬서 '슬롯'이 유일한 제약임을 분명히 한다.
         goodsId = goodsRepository.save(Goods.builder()
-            .name("한정 굿즈").price(19_000L).openAt(LocalDateTime.now())
+            .name("한정 굿즈").price(19_000L).openAt(LocalDateTime.now(clock).minusMinutes(1))
             .maxPurchasePerMember(1).build()).getId();
         stockRepository.save(Stock.builder()
             .goodsId(goodsId).totalQuantity(INITIAL_STOCK).availableQuantity(INITIAL_STOCK).build());

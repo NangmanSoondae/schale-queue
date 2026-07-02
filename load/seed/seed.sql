@@ -16,9 +16,11 @@ DELETE FROM goods;
 DELETE FROM member;
 SET FOREIGN_KEY_CHECKS = 1;
 
+-- open_at 은 앱의 판매 시작 게이트(UC-02)가 UTC Clock 으로 비교하므로 반드시 UTC 기준 과거여야 한다.
+-- NOW() 는 컨테이너 세션 존(Asia/Seoul)이라 UTC 대비 +9h 미래가 되어 전 요청이 SALE_NOT_OPEN 으로 거부된다.
 INSERT INTO goods (id, name, description, price, open_at, created_at, updated_at) VALUES
-    (1001, '부하-배송형(B2 오버셀)', NULL, 49000, NOW(), NOW(), NOW()),
-    (1002, '부하-예매형(B1 지연)',  NULL, 49000, NOW(), NOW(), NOW());
+    (1001, '부하-배송형(B2 오버셀)', NULL, 49000, UTC_TIMESTAMP() - INTERVAL 1 HOUR, NOW(), NOW()),
+    (1002, '부하-예매형(B1 지연)',  NULL, 49000, UTC_TIMESTAMP() - INTERVAL 1 HOUR, NOW(), NOW());
 
 -- 예약 모델(P-S2): available=total, reserved=0, sold=0 으로 시드
 INSERT INTO stock (goods_id, total_quantity, available_quantity, reserved_quantity, sold_quantity, created_at, updated_at) VALUES

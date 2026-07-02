@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.schale.queue.api.order.dto.OrderResponse;
+import com.schale.queue.core.domain.stock.InsufficientStockException;
 import com.schale.queue.core.domain.order.Order;
 import com.schale.queue.core.domain.order.OrderService;
 import com.schale.queue.core.domain.order.OrderStatus;
@@ -79,15 +80,29 @@ class OrderFacadeTest {
     @Test
     @DisplayName("비즈니스 거부(재고 부족)는 토큰을 재발급하지 않는다 (입장 턴 소진)")
     void does_not_reissue_on_business_rejection() {
-        // given — 소비 성공 후 주문이 재고 부족(IllegalStateException)으로 실패
+        // given — 소비 성공 후 주문이 품절(전용 예외)로 실패
         given(admissionTokenService.revoke(GOODS_ID, MEMBER_ID)).willReturn(true);
         given(orderService.createOrder(MEMBER_ID, GOODS_ID, QUANTITY))
-            .willThrow(new IllegalStateException("재고 부족"));
+            .willThrow(new InsufficientStockException("재고 부족"));
 
         // when & then — 예외는 전파되고, 토큰은 소진된 채 둔다
         assertThatThrownBy(() -> orderFacade.placeOrder(MEMBER_ID, GOODS_ID, QUANTITY))
-            .isInstanceOf(IllegalStateException.class);
+            .isInstanceOf(InsufficientStockException.class);
         then(admissionTokenService).should(never()).issue(GOODS_ID, MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("범용 IllegalStateException(직렬화 실패 등)은 시스템 오류로 보고 토큰을 재발급한다(리뷰 M3)")
+    void reissues_on_generic_illegal_state() {
+        // given — 과거엔 이 타입 전부를 '비즈니스 거부'로 오분류해 사용자 토큰을 부당 소각했다
+        given(admissionTokenService.revoke(GOODS_ID, MEMBER_ID)).willReturn(true);
+        given(orderService.createOrder(MEMBER_ID, GOODS_ID, QUANTITY))
+            .willThrow(new IllegalStateException("이벤트 직렬화 실패 orderId=1"));
+
+        // when & then — 예외 전파 + 토큰 재발급(사용자 책임 아님)
+        assertThatThrownBy(() -> orderFacade.placeOrder(MEMBER_ID, GOODS_ID, QUANTITY))
+            .isInstanceOf(IllegalStateException.class);
+        then(admissionTokenService).should().issue(GOODS_ID, MEMBER_ID);
     }
 
     @Test
