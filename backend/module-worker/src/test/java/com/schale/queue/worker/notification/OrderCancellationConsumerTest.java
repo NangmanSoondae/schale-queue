@@ -33,11 +33,26 @@ class OrderCancellationConsumerTest {
             OrderCancelledEvent.of(1001L, 42L, OrderCancelledEvent.REASON_PAYMENT_EXPIRED);
         given(processedEventRepository.existsByEventIdAndConsumerGroup(event.eventId(), "notification"))
             .willReturn(false);
+        given(notifyGatewayClient.notifyOrderCancelled(event)).willReturn(true);
 
         consumer.onOrderCancelled(event);
 
         then(notifyGatewayClient).should().notifyOrderCancelled(event);
         then(processedEventRepository).should().save(any(ProcessedEvent.class));
+    }
+
+    @Test
+    @DisplayName("전송 실패: processed 마킹 없이 던져 재시도/DLT 로 이어간다(리뷰 M10)")
+    void throws_without_marking_processed_on_delivery_failure() {
+        OrderCancelledEvent event =
+            OrderCancelledEvent.of(1001L, 42L, OrderCancelledEvent.REASON_PAYMENT_EXPIRED);
+        given(processedEventRepository.existsByEventIdAndConsumerGroup(event.eventId(), "notification"))
+            .willReturn(false);
+        given(notifyGatewayClient.notifyOrderCancelled(event)).willReturn(false);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> consumer.onOrderCancelled(event))
+            .isInstanceOf(NotificationDeliveryException.class);
+        then(processedEventRepository).should(never()).save(any());
     }
 
     @Test

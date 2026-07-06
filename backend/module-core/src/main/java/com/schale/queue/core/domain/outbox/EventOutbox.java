@@ -20,7 +20,8 @@ import lombok.NoArgsConstructor;
  *
  * <p>발행할 이벤트를 <b>비즈니스 변경과 같은 트랜잭션</b>에서 이 테이블에 기록한다(예: {@code PaymentService.confirm}).
  * 주문이 커밋됐으면 "보낼 이벤트"도 무조건 DB 에 남으므로, 앱이 죽어도 유실되지 않는다. 워커의 릴레이가
- * {@code PENDING} 행을 읽어 Kafka 로 발행하고 broker ack 후 {@link #markSent} 로 표시한다(at-least-once).
+ * {@code PENDING} 행을 읽어 Kafka 로 발행하고 broker ack 후 벌크 UPDATE({@code EventOutboxRepository.markSent})
+ * 로 {@code SENT} 표시한다(at-least-once, 리뷰 M2 — 발행은 DB 트랜잭션 밖).
  *
  * <p>도메인과 발행 파이프라인을 디커플하기 위해 <b>FK 를 두지 않고</b> {@code payload} 에 직렬화된 JSON 만 담는다.
  */
@@ -90,11 +91,5 @@ public class EventOutbox extends BaseTimeEntity {
             .payload(payload)
             .status(OutboxStatus.PENDING)
             .build();
-    }
-
-    /** 발행 완료 처리({@code PENDING→SENT}). 릴레이가 broker ack 를 받은 뒤에만 호출한다. */
-    public void markSent(LocalDateTime sentAt) {
-        this.status = OutboxStatus.SENT;
-        this.sentAt = sentAt;
     }
 }

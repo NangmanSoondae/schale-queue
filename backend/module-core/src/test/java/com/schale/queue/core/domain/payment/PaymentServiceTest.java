@@ -81,6 +81,8 @@ class PaymentServiceTest {
         paymentService.confirm(ORDER_ID, MEMBER_ID, null);
 
         then(stockService).should().confirm(GOODS_ID, QTY);
+        // 슬롯 반납(리뷰 M7): 확정으로 활성 주문이 끝났으므로 한도 내 재구매가 가능해야 한다
+        then(purchaseSlotRepository).should().deleteByMemberIdAndGoodsId(MEMBER_ID, GOODS_ID);
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PAID);
         assertThat(payment.getPaymentUid()).isEqualTo("SIM-" + ORDER_ID);
         assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.COMPLETED);
