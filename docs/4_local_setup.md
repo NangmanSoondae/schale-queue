@@ -109,7 +109,7 @@ docker compose down
 
 ## 4.5. 풀스택 컨테이너 실행 (Phase 5 통합 배포)
 
-개발 중엔 위(4.4)처럼 인프라만 컨테이너로 띄우고 앱은 `bootRun` 으로 실행하는 것이 빠르다. 반면 **전체 시스템을 한 번에** 띄워 데모하거나 통합 동작을 확인할 땐, `app` 프로파일로 api·worker 까지 컨테이너로 묶어 기동한다.
+개발 중엔 위(4.4)처럼 인프라만 컨테이너로 띄우고 앱은 `bootRun` 으로 실행하는 것이 빠르다. 반면 **전체 시스템을 한 번에** 띄워 데모하거나 통합 동작을 확인할 땐, `app` 프로파일로 api·worker·**frontend(nginx)** 까지 컨테이너로 묶어 기동한다. 프론트는 `http://localhost:3000`(FRONTEND_PORT) — nginx 가 `/api` 를 api 컨테이너로 리버스 프록시하므로 same-origin 으로 동작한다(CORS 불필요, SSE 무버퍼링 설정 포함).
 
 ```bash
 # 인프라만 (기본) — bootRun 개발 흐름. 앱은 호스트에서 localhost 로 접속
@@ -141,13 +141,13 @@ docker compose --profile app down
 React 프론트(대기열 → 주문 → 결제 플로우)를 로컬에서 돌려보는 절차.
 
 ```bash
-# 1) 백엔드 기동 — 풀스택(4.5) 권장. worker 가 떠 있어야 대기열이 소비되어 '입장'이 발생한다.
-docker compose --profile app up -d --build
+# 1) 풀스택 기동(frontend 포함) — worker 가 떠 있어야 대기열이 소비되어 '입장'이 발생한다.
+docker compose --profile app up -d --build   # 프론트: http://localhost:3000 (FRONTEND_PORT)
 
 # 2) 데모 시드 적용 (⚠️ 기존 주문/재고/회원 데이터 초기화 — 로컬 전용)
 docker compose exec -T mariadb sh -c 'mariadb -uschale -p"$MARIADB_PASSWORD" schale_queue' < load/seed/demo_seed.sql
 
-# 3) 프론트 개발 서버
+# 3) (선택) 프론트 코드 수정 중일 땐 컨테이너 대신 Vite dev 서버가 빠르다(HMR)
 cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 

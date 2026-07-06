@@ -161,6 +161,32 @@ services:
       kafka:
         condition: service_healthy
 
+  # ==========================================================================
+  #  frontend — React 정적 빌드 + nginx (Phase 5)
+  #   · /api 를 api 컨테이너로 리버스 프록시(same-origin → CORS 불필요, SSE 무버퍼링).
+  #   · 개발 중엔 이 서비스 대신 Vite dev 서버(npm run dev, 4.6절)를 쓰는 게 빠르다.
+  # ==========================================================================
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+    container_name: schale-frontend
+    restart: unless-stopped
+    mem_limit: 128m          # 정적 서빙 nginx — 소형 상한이면 충분
+    ports:
+      # 호스트 노출 포트는 FRONTEND_PORT 로 오버라이드(기본 3000). 컨테이너 내부는 80 고정.
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # nginx 가 index.html 을 실제로 응답하는지 확인(busybox wget 내장).
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
 volumes:
   schale-mariadb-data:
   schale-redis-data:
