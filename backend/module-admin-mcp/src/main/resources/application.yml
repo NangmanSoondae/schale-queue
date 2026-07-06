@@ -37,6 +37,12 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+schale:
+  admin:
+    # 쓰기 툴(create_goods/adjust_stock/update_goods_open_at) 노출 게이트(ADR-009 §3).
+    # 기본 false = 읽기 전용. 운영 조작이 필요할 때만 ADMIN_WRITE_ENABLED=true 로 기동한다.
+    write-enabled: ${ADMIN_WRITE_ENABLED:false}
+
 logging:
   threshold:
     console: "OFF"                 # stdout 보호(핵심) — 콘솔 로깅 완전 차단
