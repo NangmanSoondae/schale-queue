@@ -34,6 +34,9 @@ public record OrderCancelledEvent(
     public static final String REASON_PAYMENT_EXPIRED = "PAYMENT_EXPIRED";
 
     public static OrderCancelledEvent of(Long orderId, Long memberId, String reason) {
-        return new OrderCancelledEvent(UUID.randomUUID().toString(), orderId, memberId, reason, LocalDateTime.now());
+        // 시간 출처 통일(리뷰 '시간대 3원화'): 주문완료 이벤트와 동일하게 도메인 Clock(UTC)과 같은 출처.
+        return new OrderCancelledEvent(
+            UUID.randomUUID().toString(), orderId, memberId, reason,
+            LocalDateTime.now(java.time.Clock.systemUTC()));
     }
 }

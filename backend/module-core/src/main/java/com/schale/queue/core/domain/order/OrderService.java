@@ -13,7 +13,6 @@ import com.schale.queue.core.domain.payment.PaymentStatus;
 import com.schale.queue.core.domain.payment.repository.PaymentRepository;
 import com.schale.queue.core.domain.stock.StockService;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -44,7 +43,8 @@ public class OrderService {
      * <p>대규모 트래픽에서 PG 연동 지연을 방어하기 위한 값으로, 우선 도메인 기본값으로 둔다.
      * 운영 중 조정이 필요해지면 외부 설정(application.yml)으로 승격한다(§5.4.1).
      */
-    private static final Duration PAYMENT_TIMEOUT = Duration.ofMinutes(5);
+    // P-O2: 결제창 수명은 상품별 설정(Goods.paymentTimeoutMinutes, 기본 10분·허용 1~30).
+    // 과거의 5분 고정 상수는 문서-코드 드리프트였다(리뷰 잔여 항목) — Goods.paymentTimeout() 로 대체.
 
     private final StockService stockService;
     private final GoodsRepository goodsRepository;
@@ -128,7 +128,7 @@ public class OrderService {
             // 만료 검사(PaymentExpiryWorker)와 '같은 시간 출처(Clock)'를 써야 한다. 과거엔 여기서
             // 시스템 기본 존의 now() 를, 만료 검사는 UTC clock 을 써 타임존이 어긋나 만료가 ~9h 늦게
             // 발동했다(troubleshooting No.10). Clock 으로 통일해 생성·검사를 일관되게 맞춘다.
-            .timeoutAt(LocalDateTime.now(clock).plus(PAYMENT_TIMEOUT))
+            .timeoutAt(LocalDateTime.now(clock).plus(goods.paymentTimeout()))
             .build());
 
         // ⑦ 활성 구매 슬롯을 점유한다(P-O3 동시성). (member, goods) 유니크 제약이 같은 회원의 동시

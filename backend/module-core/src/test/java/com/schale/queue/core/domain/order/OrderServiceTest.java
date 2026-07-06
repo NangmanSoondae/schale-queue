@@ -128,7 +128,7 @@ class OrderServiceTest {
         assertThat(savedItem.getQuantity()).isEqualTo(quantity);
         assertThat(savedItem.getOrderPrice()).isEqualTo(unitPrice);
 
-        // then — 결제: READY 상태 + 총액 + 만료 시각(now + 5분) 부여
+        // then — 결제: READY 상태 + 총액 + 만료 시각(now + 상품별 타임아웃, 미지정 기본 10분 — P-O2) 부여
         ArgumentCaptor<Payment> paymentCaptor = ArgumentCaptor.forClass(Payment.class);
         then(paymentRepository).should().save(paymentCaptor.capture());
         Payment savedPayment = paymentCaptor.getValue();
@@ -137,8 +137,50 @@ class OrderServiceTest {
         assertThat(savedPayment.getStatus()).isEqualTo(PaymentStatus.READY);
         assertThat(savedPayment.getPaymentUid()).isNull();
         assertThat(savedPayment.getTimeoutAt())
-            .as("결제 만료 시각은 고정 Clock 기준 +5분이어야 한다")
-            .isEqualTo(fixedNow.plusMinutes(5));
+            .as("결제 만료 시각은 고정 Clock 기준 +10분(P-O2 기본)이어야 한다")
+            .isEqualTo(fixedNow.plusMinutes(10));
+    }
+
+    @Test
+    @DisplayName("상품별 결제 타임아웃이 지정되면 만료 시각에 그 값이 쓰인다(P-O2 — 리뷰 잔여 드리프트 해소)")
+    void createOrder_uses_goods_specific_payment_timeout() {
+        // given — 결제창 15분 상품
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .maxPurchasePerMember(5)
+            .paymentTimeoutMinutes(15)
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+        given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
+            Order saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 102L);
+            return saved;
+        });
+
+        // when
+        orderService.createOrder(1L, goodsId, 1);
+
+        // then — timeoutAt = now + 15분
+        ArgumentCaptor<Payment> paymentCaptor = ArgumentCaptor.forClass(Payment.class);
+        then(paymentRepository).should().save(paymentCaptor.capture());
+        assertThat(paymentCaptor.getValue().getTimeoutAt())
+            .isEqualTo(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).plusMinutes(15));
+    }
+
+    @Test
+    @DisplayName("결제 타임아웃 허용 범위(1~30분)를 벗어난 상품 생성은 거부된다(P-O2)")
+    void goods_rejects_out_of_range_payment_timeout() {
+        assertThatThrownBy(() -> Goods.builder()
+            .name("한정 굿즈").price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC))
+            .paymentTimeoutMinutes(31)
+            .build())
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
