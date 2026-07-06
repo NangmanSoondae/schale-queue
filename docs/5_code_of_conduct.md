@@ -137,13 +137,18 @@
 
 - **1차 (게이트웨이 API · 기본)** — 채널·수신자·내용만 게이트웨이에 넘기고, 실제 웹훅 URL/벤더 키는 게이트웨이가 보유한다(시크릿 중앙화). `to`는 게이트웨이에 등록된 schale-queue 논리 채널 alias `schale-ops`. URL·키는 `.env`의 `$NOTIFY_GATEWAY_URL`·`$NOTIFY_GATEWAY_API_KEY`.
 
+  작업 알림은 응답을 기다릴 필요 없는 fire-and-forget 이므로 **`Prefer: respond-async`** 로 보낸다(게이트웨이 README §5) — 202 가 즉시 오고 백그라운드 릴레이가 발송한다. Location 헤더(요청 ID)는 로그에 남기면 충분하며, 상태 추적이 필요할 때만 `GET /api/v1/notifications/{id}` 로 조회한다.
+
   ```bash
   # payload.json (UTF-8): {"channel":"discord","to":"schale-ops","title":"[Claude Code 알림]","message":"🤖 샬레 큐 작업 완료/승인 대기"}
   curl -X POST "$NOTIFY_GATEWAY_URL/api/v1/notifications" \
     -H "Authorization: Bearer $NOTIFY_GATEWAY_API_KEY" \
     -H "Content-Type: application/json" \
+    -H "Prefer: respond-async" \
     --data-binary @payload.json
   ```
+
+  > 💡 **중복 발송이 해로운 알림**(재시도/중복 트리거 가능 경로 — 예: 워커의 주문 완료/취소 알림)은 `Idempotency-Key: <비즈니스 이벤트당 유일 키>` 헤더를 추가한다(게이트웨이 README §2, TTL 24h). 키는 이벤트의 안정 식별자에서 유도하며(예: `order-completed-{eventId}`), 랜덤 UUID 신규 생성은 멱등성을 무력화하므로 금지. 코드 경로는 `NotifyGatewayClient`(module-worker)가 이미 적용한다.
 
 - **폴백 (게이트웨이 미기동/도달 불가)** — 게이트웨이가 떠 있지 않으면 기존 방식인 Discord 웹훅 직접 호출(`$DISCORD_WEBHOOK_URL`)로 폴백한다(현행 방식 보존 — ADR-003 §4 롤백 안전망).
 
