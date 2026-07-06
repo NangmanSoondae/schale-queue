@@ -90,6 +90,39 @@ sample_metrics() { # $1 = 초, 부하 중 피크 스레드/힙 추적
   echo "[sample] PEAK jvm.threads.live=$peakThreads  jvm.memory.used=${peakMemMB}MB  (peak threads.peak=$(metric jvm.threads.peak | cut -d. -f1))"
 }
 
+settlement_check() { # T3 무유실(S8): 완료 주문 == PAID 결제 == settlement 원장 (Kafka 파이프라인)
+  # 컨슈머 lag 을 감안해 settlement 행 수가 목표에 도달/정체할 때까지 폴링한다(최대 60s).
+  local goods="${1:-1002}" completedOrders paid settled prev=-1 waited=0
+  completedOrders=$(mariadb_exec -N -B -e "SELECT COUNT(*) FROM orders WHERE order_status='COMPLETED'")
+  paid=$(mariadb_exec -N -B -e "SELECT COUNT(*) FROM payment WHERE status='PAID'")
+  echo "[settlement-check] 완료 주문=$completedOrders, PAID 결제=$paid — settlement 수렴 대기…"
+  while [ "$waited" -lt 60 ]; do
+    settled=$(mariadb_exec -N -B -e "SELECT COUNT(*) FROM settlement")
+    [ "$settled" -eq "$completedOrders" ] && break
+    [ "$settled" -eq "$prev" ] && [ "$waited" -ge 10 ] && break   # 10s 이상 정체 = 수렴 실패
+    prev=$settled; sleep 2; waited=$((waited + 2))
+  done
+  echo "[settlement-check] settlement=$settled (${waited}s 수렴)"
+  if [ "$completedOrders" -eq "$paid" ] && [ "$paid" -eq "$settled" ] && [ "$completedOrders" -gt 0 ]; then
+    echo "[settlement-check] PASS ✅ 무유실(S8): 완료 $completedOrders = PAID $paid = 정산 $settled"
+  else
+    echo "[settlement-check] FAIL ❌ 완료=$completedOrders PAID=$paid 정산=$settled"; return 1
+  fi
+}
+
+oversell_check_1002() { # e2e(결제 연결) 후 재고 정합: 합계 불변식 + sold == 완료 주문 수
+  local expect="${1:-0}" total available reserved sold completedOrders
+  read -r total available reserved sold < <(mariadb_exec -N -B -e \
+    "SELECT total_quantity, available_quantity, reserved_quantity, sold_quantity FROM stock WHERE goods_id=1002")
+  completedOrders=$(mariadb_exec -N -B -e "SELECT COUNT(*) FROM orders WHERE order_status='COMPLETED'")
+  echo "[stock-check] total=$total available=$available reserved=$reserved sold=$sold | 완료 주문=$completedOrders"
+  if [ "$((available + reserved + sold))" -eq "$total" ] && [ "$sold" -eq "$completedOrders" ] && [ "$sold" -le "$total" ]; then
+    echo "[stock-check] PASS ✅ (합계 불변식, sold=완료주문=$sold)"
+  else
+    echo "[stock-check] FAIL ❌ (불변식 위반)"; return 1
+  fi
+}
+
 oversell_check() {
   # 예약 모델(P-S2): 주문은 available-- reserved++. 결제 미연결이라 sold=0, 성공 주문 수=reserved.
   local total available reserved sold ordered
@@ -129,6 +162,23 @@ case "$cmd" in
     k6_run order.js -e "VUS=${1:-200}" -e "MEMBERS=$n" -e "GOODS_ID=1001" || echo "[b2] k6 threshold 일부 미충족 — 검증 계속"
     oversell_check
     ;;
+  # T3 E2E 무유실(S8): 진입 백로그 → 워커 입장 → 주문+결제확정 → 정산 원장 정합
+  e2e)
+    vus="${1:-100}"; n="${2:-1000}"
+    reset_orders
+    mariadb_exec -e "DELETE FROM settlement"
+    docker exec -i "$REDIS_C" sh -c "redis-cli --scan --pattern 'admission:*' | xargs -r -n 500 redis-cli DEL" >/dev/null
+    docker exec -i "$REDIS_C" redis-cli DEL queue:1002 >/dev/null
+    echo "[e2e] 백로그 $n 적재 → 워커 입장 대기…"
+    seq 1 "$n" | sed 's#.*#ZADD queue:1002 & &#' | docker exec -i "$REDIS_C" redis-cli --pipe >/dev/null
+    docker exec -i "$REDIS_C" redis-cli SADD queue:active 1002 >/dev/null
+    for _ in $(seq 1 60); do sleep 1; [ "$(qsize)" -le 0 ] && break; done
+    echo "[e2e] 입장 완료(잔여 큐 $(qsize)). 주문+결제 k6 시작…"
+    k6_run order-pay.js -e "VUS=$vus" -e "MEMBERS=$n" -e "GOODS_ID=1002" || echo "[e2e] k6 threshold 일부 미충족 — 검증 계속"
+    settlement_check 1002
+    oversell_check_1002 "$n"
+    ;;
+  settlement-check) settlement_check "${1:-1002}" ;;
   # S4 대표값: 큐가 입장률로 조절한 '저동시성' 주문 경로(대재고 1002)를 측정한다.
   s4-baseline)
     vus="${1:-20}"; n="${2:-1000}"

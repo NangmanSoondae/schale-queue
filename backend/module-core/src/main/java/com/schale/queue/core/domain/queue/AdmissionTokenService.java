@@ -1,5 +1,9 @@
 package com.schale.queue.core.domain.queue;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -51,6 +55,32 @@ public class AdmissionTokenService {
      */
     public boolean hasValidToken(Long goodsId, Long memberId) {
         return RedisResults.isTrue(redis.hasKey(QueueKeys.admission(goodsId, memberId)));
+    }
+
+    /**
+     * 여러 회원의 유효 토큰 보유 여부를 <b>{@code MGET} 1회 왕복</b>으로 일괄 확인한다.
+     *
+     * <p>SSE 브로드캐스트의 벌크 경로(리뷰 M8) — 구독자별 {@code EXISTS} 개별 왕복을 제거한다.
+     *
+     * @return 유효한 입장 토큰을 보유한 memberId 집합
+     */
+    public Set<Long> membersWithValidToken(Long goodsId, Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> ordered = List.copyOf(memberIds);
+        List<String> values = redis.opsForValue().multiGet(
+            ordered.stream().map(memberId -> QueueKeys.admission(goodsId, memberId)).toList());
+        Set<Long> admitted = new HashSet<>();
+        if (values == null) {
+            return admitted;
+        }
+        for (int i = 0; i < ordered.size(); i++) {
+            if (values.get(i) != null) {
+                admitted.add(ordered.get(i));
+            }
+        }
+        return admitted;
     }
 
     /**

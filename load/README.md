@@ -32,6 +32,16 @@ docker compose up -d                 # MariaDB + Redis (.env 자동 로드)
 
 `b2` 는 내부적으로 `reset-orders → seed-tokens → order.js → oversell-check` 를 순차 실행한다.
 
+## Phase 5 통합 시나리오
+
+```bash
+./load/run.sh e2e 100 1000        # T3: 진입→워커 입장→주문+결제→정산 무유실(S8) 판정까지 원샷
+node load/sse-bench.mjs 2000 15   # T2: SSE 구독 N개의 브로드캐스트 tick 스프레드 실측(M8) — 워커 정지 후
+```
+
+- `e2e` 는 컨테이너 풀스택(`--profile app`) + Kafka 가 떠 있어야 한다. 결과: [`docs/load_test_report_phase5.md`](../docs/load_test_report_phase5.md).
+- `sse-bench` 전제: 워커 정지(`docker compose stop worker` — 입장하면 스트림이 닫힘), 회원 1..N ZADD 시드, `admission:*` 키 정리. 반복 실행 시 Windows TIME_WAIT 포트 고갈에 주의(리포트 '정직 기록' 참조).
+
 ## VT vs 플랫폼 스레드 비교 (§9.4.1)
 
 앱을 두 모드로 각각 기동해 같은 시나리오를 돌리고 결과를 대조한다.

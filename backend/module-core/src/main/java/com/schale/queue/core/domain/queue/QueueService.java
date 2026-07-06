@@ -1,11 +1,16 @@
 package com.schale.queue.core.domain.queue;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -134,6 +139,37 @@ public class QueueService {
     public OptionalLong getPosition(Long goodsId, Long memberId) {
         Long rank = redis.opsForZSet().rank(QueueKeys.waitingQueue(goodsId), String.valueOf(memberId));
         return rank == null ? OptionalLong.empty() : OptionalLong.of(rank + 1);
+    }
+
+    /**
+     * 여러 회원의 대기 순번을 <b>파이프라인 1회 왕복</b>으로 일괄 조회한다(1-based).
+     *
+     * <p>SSE 브로드캐스트의 벌크 경로(리뷰 M8). 구독자별 {@code ZRANK} 를 개별 왕복으로 보내면
+     * 구독 N 에 비례해 네트워크 RTT 가 쌓여 브로드캐스트가 폴링 주기를 넘긴다
+     * (실측: 구독자당 ~0.74ms, 2,000 구독에서 tick ~1.5s). 파이프라인은 명령 수는 같지만
+     * 왕복을 1회로 합쳐 이 항을 제거한다.
+     *
+     * @return memberId → 순번. <b>대기 중인 회원만</b> 담긴다(입장/이탈자는 키 없음).
+     */
+    public Map<Long, Long> getPositions(Long goodsId, Collection<Long> memberIds) {
+        if (memberIds.isEmpty()) {
+            return Map.of();
+        }
+        byte[] key = QueueKeys.waitingQueue(goodsId).getBytes(StandardCharsets.UTF_8);
+        List<Long> ordered = List.copyOf(memberIds);
+        List<Object> ranks = redis.executePipelined((RedisCallback<Object>) connection -> {
+            for (Long memberId : ordered) {
+                connection.zSetCommands().zRank(key, String.valueOf(memberId).getBytes(StandardCharsets.UTF_8));
+            }
+            return null;
+        });
+        Map<Long, Long> positions = new HashMap<>();
+        for (int i = 0; i < ordered.size(); i++) {
+            if (ranks.get(i) instanceof Number rank) {
+                positions.put(ordered.get(i), rank.longValue() + 1);
+            }
+        }
+        return positions;
     }
 
     /** 현재 대기 인원 수. */
