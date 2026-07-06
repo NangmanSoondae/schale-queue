@@ -118,6 +118,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * SSE 등 비동기 요청 중 <b>클라이언트가 먼저 연결을 끊은</b> 경우. 서버 오류가 아니라 정상 이탈이므로
+     * 500/ERROR 로 집계하지 않는다 — Phase 5 부하 실측에서 대량 이탈(수천 SSE 동시 종료)이
+     * catch-all 을 타고 ERROR 로그 폭탄이 되는 것을 확인했다. 응답은 이미 쓸 수 없으므로 본문 없이 반환.
+     */
+    @ExceptionHandler(org.springframework.web.context.request.async.AsyncRequestNotUsableException.class)
+    public ResponseEntity<Void> handleClientDisconnected(
+        org.springframework.web.context.request.async.AsyncRequestNotUsableException e) {
+        log.debug("비동기 요청 클라이언트 이탈(정상 종료 경로): {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+    }
+
+    /**
      * 최후 방어선: 위에서 매핑되지 않은 모든 예외 = 시스템 오류. 장애 상황에서도 클라이언트가 기대하는
      * {@link ErrorResponse} 계약을 유지하고(리뷰 M4 — 프레임워크 기본 /error 본문으로 새지 않게),
      * 내부 메시지는 응답에 싣지 않는다(§5.3.2). 원인은 서버 로그로만 남긴다.

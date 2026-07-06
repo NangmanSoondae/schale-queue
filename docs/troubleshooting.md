@@ -398,3 +398,35 @@ test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /act
 
 ### 5) 결과 (Result)
 `docker compose config` 파싱 통과. 교훈: **`CMD-SHELL` 의 셸은 이미지의 `/bin/sh` 이며 그것이 bash 라는 보장은 어디에도 없다.** bash 확장(`/dev/tcp`, `[[ ]]`, 프로세스 치환)을 헬스체크에 쓰려면 반드시 `["CMD", "bash", "-c", ...]` 로 명시 호출할 것. (컨테이너 재기동 검증은 슬라이스 3 의 CI docker build 잡과 다음 풀스택 e2e 에서 수행.)
+
+---
+
+## [No.13] SSE 대량 이탈이 ERROR 로그 폭탄으로 — 클라이언트 끊김을 500 시스템 오류로 오분류
+
+- **일자**: 2026-07-06
+- **관련 Phase**: Phase 5 (통합 부하테스트)
+- **태그**: `#SSE` `#예외처리` `#관측성` `#부하테스트`
+
+### 1) 발견 (Discovery)
+> M8 SSE 브로드캐스트 벤치(구독 수천 개를 열었다가 측정 종료 시 일괄 종료) 직후, api 컨테이너 로그에 ERROR 가 수천 건 쏟아졌다.
+
+```
+2026-07-06T01:04:44.685Z ERROR 1 --- [schale-queue-api] [at-handler-3478] c.s.q.api.common.GlobalExceptionHandler  : 처리되지 않은 예외 — 500 으로 응답
+org.springframework.web.context.request.async.AsyncRequestNotUsableException: Servlet container error notification for disconnected client
+	at org.springframework.web.context.request.async.StandardServletAsyncWebRequest.lambda$onError$0(StandardServletAsyncWebRequest.java:195) ~[spring-web-6.2.6.jar!/:6.2.6]
+	at org.apache.catalina.core.AsyncListenerWrapper.fireOnError(AsyncListenerWrapper.java:49) ~[tomcat-embed-core-10.1.40.jar!/:na]
+```
+
+### 2) 분석 (Analysis)
+`AsyncRequestNotUsableException` 은 **클라이언트가 비동기 요청(SSE)을 먼저 끊었다**는 서블릿 컨테이너의 통지다. 서버 결함이 아니라 정상 이탈 경로인데, 리뷰 M4 로 도입한 **500 catch-all**(`@ExceptionHandler(Exception.class)`)이 이를 시스템 오류로 오분류해 `log.error` + 스택트레이스로 남겼다. 브라우저 새로고침/이탈이 잦은 SSE 특성상, 대량 접속 상황에서는 이 오탐이 로그를 지배해 **진짜 ERROR 를 묻어버린다**(관측성 훼손). 응답 역시 이미 끊긴 연결이라 500 본문을 쓸 수도 없다.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — catch-all 내부에서 instanceof 분기**: 코드 한 곳. 단, catch-all 의 "여기 오면 전부 시스템 오류"라는 단일 책임이 흐려진다.
+- **방안 B — 전용 `@ExceptionHandler` 추가**: 매핑 의도가 시그니처로 드러나고 catch-all 은 순수하게 유지된다. 스프링이 더 구체적인 핸들러를 우선 선택하므로 동작도 자명하다. 단점: 핸들러 1개 증가.
+- **방안 C — 로깅 필터/레벨 조정으로 숨기기**: 코드 무변경. 그러나 500 응답 시도(무의미한 본문 직렬화)는 그대로고, 근본 분류 오류를 로그 설정으로 가리는 것뿐이다.
+
+### 4) 해결 (Resolution)
+방안 B 채택 — `GlobalExceptionHandler` 에 `AsyncRequestNotUsableException` 전용 핸들러를 추가했다. `log.debug` 로 강등하고(정상 이탈), 본문 없는 응답을 반환한다(연결이 이미 죽어 어차피 전송 불가).
+
+### 5) 결과 (Result)
+동일 벤치 재실행 시 ERROR 오탐 0건. SSE 대량 이탈은 debug 레벨로만 관측된다. 교훈: **catch-all 을 두는 순간, "예외지만 오류가 아닌 것"(클라이언트 이탈, 취소)을 명시적으로 골라내는 짝 핸들러가 반드시 따라와야 한다.** 부하테스트는 기능 결함만이 아니라 이런 관측성 결함도 드러낸다.
