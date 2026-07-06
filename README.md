@@ -100,4 +100,4 @@ schale-queue/
 
 ---
 
-<p align="center"><sub><b>v1.0.0</b> — Phase 1(뼈대) → 2(동시성) → 3(대기열) → 4(EDA+AI 어드민) → 5(통합·배포) <a href="docs/3_roadmap.md">로드맵</a> 100% 이행 · 2026.06.19 ~ 07.06 · <a href="docs/18_retrospective_v1.md">회고</a></sub></p>
+<p align="center"><sub><b>v1.0.0</b> — Phase 1(뼈대) → 2(동시성) → 3(대기열) → 4(EDA+AI 어드민) → 5(통합·배포) <a href="docs/3_roadmap.md">로드맵</a> 100% 이행 · 2026.06.19 ~ 07.06 · <a href="docs/18_retrospective_v1.md">회고</a> · <a href="LICENSE">MIT License</a></sub></p>
