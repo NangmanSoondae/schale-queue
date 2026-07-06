@@ -1,0 +1,22 @@
+// ============================================================================
+//  module-admin-mcp : AI 어드민 MCP 서버 (실행 모듈, ADR-009)
+//  ----------------------------------------------------------------------------
+//  Claude Desktop/Code 같은 MCP 클라이언트가 stdio(JSON-RPC)로 연결해, 상품/재고/
+//  대기열/주문/정산을 자연어로 운영·모니터링한다. 프로토콜은 Spring AI 의 MCP 서버
+//  스타터가 처리하고, 이 모듈은 '툴 정의 + core 서비스 연결'만 담당한다.
+//
+//  [버전 근거 — §5.4.2] Spring AI 1.0.0 GA: 첫 정식 안정판, Spring Boot 3.4.x 기반
+//  (루트의 Boot 3.4.5 와 정합). BOM 으로 MCP SDK 버전을 일괄 관리한다.
+// ============================================================================
+
+dependencies {
+    // 공통 도메인/영속성 (Goods/Queue 서비스 재사용)
+    implementation project(':module-core')
+
+    // MCP 서버 (stdio). 웹 서버 불요 — spring-boot-starter 기반 컨텍스트만 기동.
+    implementation platform('org.springframework.ai:spring-ai-bom:1.0.0')
+    implementation 'org.springframework.ai:spring-ai-starter-mcp-server'
+
+    // core 의 JPA 리포지토리 참조 + 읽기 집계용 JdbcTemplate
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+}

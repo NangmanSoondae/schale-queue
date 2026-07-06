@@ -1,14 +1,17 @@
 rootProject.name = 'schale-queue'
 
 // 멀티 모듈 구성 (docs/2_architecture.md)
-//  - module-core   : 공통 도메인 / 영속성 (라이브러리)
-//  - module-api    : 사용자 대면 REST API (실행 모듈)
-//  - module-worker : 대기열 소비 / 비동기 작업 (실행 모듈, Phase 3 도입)
+//  - module-core      : 공통 도메인 / 영속성 (라이브러리)
+//  - module-api       : 사용자 대면 REST API (실행 모듈)
+//  - module-worker    : 대기열 소비 / 비동기 작업 (실행 모듈, Phase 3 도입)
+//  - module-admin-mcp : AI 어드민 MCP 서버 (실행 모듈, ADR-009 — stdio, 로컬 운영 도구)
 include 'module-core'
 include 'module-api'
 include 'module-worker'
+include 'module-admin-mcp'
 
 // Monorepo 구조 유지: 실제 모듈 디렉터리는 backend/ 하위에 위치
 project(':module-core').projectDir = file('backend/module-core')
 project(':module-api').projectDir = file('backend/module-api')
 project(':module-worker').projectDir = file('backend/module-worker')
+project(':module-admin-mcp').projectDir = file('backend/module-admin-mcp')

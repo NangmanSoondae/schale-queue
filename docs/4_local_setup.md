@@ -154,3 +154,35 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 - **API 프록시**: 개발 서버가 `/api` 를 `http://localhost:8080` 으로 프록시한다(CORS 우회). API 포트를 바꿨다면 `VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev`.
 - **회원 식별**: 인증이 없으므로 첫 방문 시 1~1000 범위 무작위 회원 ID 를 발급해 localStorage 에 보관한다(데모 시드의 회원 범위와 일치). 헤더의 입력란에서 바꿀 수 있다 — 서로 다른 브라우저/시크릿 창으로 다중 대기 시연 가능.
 - **SSE**: 대기 순번은 `X-Member-Id` 헤더가 필요해 EventSource 대신 fetch 스트리밍으로 구독한다.
+
+## 4.7. AI 어드민 (MCP) 연결 (ADR-009)
+
+상품/재고/대기열/주문/정산을 Claude 와의 대화로 운영·모니터링한다. 인프라(MariaDB·Redis)가 떠 있어야 한다.
+
+```bash
+./gradlew :module-admin-mcp:bootJar    # 1) 서버 jar 빌드
+```
+
+**Claude Desktop** — `claude_desktop_config.json` 에 추가(경로·비밀번호는 자신의 값으로):
+
+```json
+{
+  "mcpServers": {
+    "schale-queue-admin": {
+      "command": "java",
+      "args": ["-jar", "F:/workspace/schale-queue/backend/module-admin-mcp/build/libs/module-admin-mcp-0.0.1-SNAPSHOT.jar"],
+      "env": { "DB_PASSWORD": "<.env 의 DB_PASSWORD>" }
+    }
+  }
+}
+```
+
+**Claude Code** — 프로젝트 루트에서:
+
+```bash
+claude mcp add schale-queue-admin -e DB_PASSWORD=<값> -- java -jar backend/module-admin-mcp/build/libs/module-admin-mcp-0.0.1-SNAPSHOT.jar
+```
+
+연결 후 사용 예: *"지금 대기열 상태 어때?"* → `queue_status`, *"오늘 주문·정산 요약"* → `order_summary`+`settlement_summary`. 1차는 **읽기 전용 5종**(list_goods/stock_status/queue_status/order_summary/settlement_summary)이며, 쓰기 툴은 2차(ADR-009 §3 안전장치)에서 추가된다.
+
+> ⚠️ stdio 특성상 서버 로그는 stdout 이 아니라 파일(`%TEMP%/schale-admin-mcp.log`, `ADMIN_MCP_LOG` 로 변경)로 남는다.

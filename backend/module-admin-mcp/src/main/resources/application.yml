@@ -1,0 +1,44 @@
+# ============================================================================
+#  module-admin-mcp 설정 (ADR-009)
+#  ----------------------------------------------------------------------------
+#  ⚠️ stdio 전송에서 stdout 은 MCP JSON-RPC 채널이다 — 배너·콘솔 로깅을 전부 끄고
+#     로그는 파일로만 남긴다. 위반 시 클라이언트 연결이 조용히 깨진다.
+# ============================================================================
+spring:
+  application:
+    name: schale-queue-admin-mcp
+
+  main:
+    web-application-type: none     # 웹 서버 불요(stdio)
+    banner-mode: off               # stdout 보호
+
+  ai:
+    mcp:
+      server:
+        name: schale-queue-admin
+        version: 1.0.0
+        stdio: true
+
+  datasource:
+    url: ${DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
+    username: ${DB_USERNAME:schale}
+    password: ${DB_PASSWORD:}      # .env 주입(§5.3.2) — 기본값 없음(빈 값이면 접속 실패로 드러남)
+
+  jpa:
+    hibernate:
+      ddl-auto: validate           # 스키마 소유권 없음 — 검증만(ADR-009 §3)
+    open-in-view: false
+
+  flyway:
+    enabled: false                 # 마이그레이션은 api/worker 소유 — admin 은 실행하지 않는다
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+logging:
+  threshold:
+    console: "OFF"                 # stdout 보호(핵심) — 콘솔 로깅 완전 차단
+  file:
+    name: ${ADMIN_MCP_LOG:${java.io.tmpdir}/schale-admin-mcp.log}
