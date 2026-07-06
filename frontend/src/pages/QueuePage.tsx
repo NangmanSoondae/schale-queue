@@ -5,14 +5,20 @@ import { subscribeQueueStream } from '../api/sse'
 import type { QueuePositionResponse } from '../api/types'
 import { useMember } from '../member'
 
-const RECONNECT_DELAY_MS = 1_000
+// 재연결 정책(리뷰2 M-8/M-9): 오류에도 재구독하되, 지수 백오프 + 지터로 재구독 폭주를 막는다.
+// 서버 emitter 타임아웃(30분)은 오픈런 특성상 수천 스트림이 '동시에' 닫히므로, 고정 지연이면
+// 재구독 스파이크가 주기적으로 반복된다 — 지터가 이를 흩뜨린다.
+const RECONNECT_BASE_MS = 1_000
+const RECONNECT_MAX_MS = 15_000
+const RECONNECT_JITTER_MS = 3_000
 
 /**
  * 대기열 화면 — 이 프로젝트의 간판 플로우.
  *
  * 진입(enqueue)은 멱등이라(P-Q2, 이미 대기 중이면 순번 유지) 새로고침해도 안전하다.
  * 순번은 SSE 'position' 이벤트로 갱신되고, 'admitted' 를 받으면 주문 화면으로 이동한다.
- * 서버 emitter 타임아웃 등으로 스트림이 닫히면 대기 중인 동안은 자동 재구독한다.
+ * 스트림이 닫히거나(타임아웃) 오류가 나도 대기 중인 동안은 백오프+지터로 자동 재구독한다 —
+ * API 순단 수 초가 '영구 오류 화면 + 입장 알림 유실'로 굳지 않게(리뷰2 M-8).
  */
 export default function QueuePage() {
   const { goodsId } = useParams()
@@ -20,27 +26,40 @@ export default function QueuePage() {
   const { memberId } = useMember()
   const [status, setStatus] = useState<QueuePositionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reconnecting, setReconnecting] = useState(false)
   const initialWaitingRef = useRef<number | null>(null)
+  const attemptRef = useRef(0)
 
   useEffect(() => {
     const id = Number(goodsId)
     const controller = new AbortController()
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
+    const scheduleResubscribe = () => {
+      if (controller.signal.aborted) return
+      const backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(attemptRef.current, 4))
+      attemptRef.current += 1
+      reconnectTimer = setTimeout(subscribe, backoff + Math.random() * RECONNECT_JITTER_MS)
+    }
+
     const subscribe = () => {
       subscribeQueueStream(id, memberId, {
         onPosition: (data) => {
+          attemptRef.current = 0        // 이벤트 수신 = 연결 정상 → 백오프 리셋
+          setReconnecting(false)
           initialWaitingRef.current ??= data.waiting
           setStatus(data)
         },
         onAdmitted: () => navigate(`/goods/${id}/order`),
         onClose: () => {
           // admitted 없이 닫힘(타임아웃 등) — 이탈한 게 아니면 다시 구독한다.
-          if (!controller.signal.aborted) {
-            reconnectTimer = setTimeout(subscribe, RECONNECT_DELAY_MS)
-          }
+          scheduleResubscribe()
         },
-        onError: () => setError('실시간 연결이 끊어졌습니다. 새로고침해 주세요.'),
+        onError: () => {
+          // 일시 장애(API 재기동·프록시 순단)일 수 있다 — 마지막 순번을 유지한 채 재시도한다.
+          setReconnecting(true)
+          scheduleResubscribe()
+        },
       }, controller.signal)
     }
 
@@ -97,6 +116,7 @@ export default function QueuePage() {
           <p className="queue-hint">순서가 되면 자동으로 주문 화면으로 이동합니다. 이 화면을 유지해 주세요.</p>
         </>
       )}
+      {reconnecting && <p className="notice">실시간 연결 재시도 중… (대기 순번은 유지됩니다)</p>}
     </section>
   )
 }
