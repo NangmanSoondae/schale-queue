@@ -96,8 +96,8 @@ schale-queue/
 | 설계 | [아키텍처](docs/2_architecture.md) · [도메인 정책](docs/11_domain_policy.md) · [기능 명세](docs/10_functional_spec.md) · [NFR/SLO](docs/9_nfr_and_slo.md) |
 | ADR | [엔티티 설계](docs/6_adr_001_entity_design.md) · [큐 하이브리드](docs/7_adr_002_queue_architecture.md) · [알림 외부화](docs/8_adr_003_notification_externalization.md) · [예약 재고](docs/12_adr_004_stock_reservation.md) · [컨텍스트 분리](docs/13_adr_005_bounded_context_split.md) · [환불 정책](docs/14_adr_006_refund_cancellation_policy.md) · [아웃박스](docs/15_adr_007_transactional_outbox.md) · [Flyway](docs/16_adr_008_schema_migration_flyway.md) · [AI 어드민 MCP](docs/17_adr_009_ai_admin_mcp.md) |
 | 실측 | [Phase 3 부하 리포트](docs/load_test_report.md) · [Phase 5 통합 리포트](docs/load_test_report_phase5.md) |
-| 기록 | [트러블슈팅 일지 13건](docs/troubleshooting.md) — 발견→분석→고찰→해결→결과 5단계 포맷 |
+| 기록 | [트러블슈팅 일지 16건](docs/troubleshooting.md) — 발견→분석→고찰→해결→결과 5단계 포맷 · [v1 회고](docs/18_retrospective_v1.md) |
 
 ---
 
-<p align="center"><sub>Phase 1(뼈대) → 2(동시성) → 3(대기열) → 4(EDA) → 5(통합·배포) — <a href="docs/3_roadmap.md">로드맵</a> 전 구간 완주 · 2026.06 ~ 2026.07</sub></p>
+<p align="center"><sub><b>v1.0.0</b> — Phase 1(뼈대) → 2(동시성) → 3(대기열) → 4(EDA+AI 어드민) → 5(통합·배포) <a href="docs/3_roadmap.md">로드맵</a> 100% 이행 · 2026.06.19 ~ 07.06 · <a href="docs/18_retrospective_v1.md">회고</a></sub></p>
