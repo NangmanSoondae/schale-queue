@@ -85,10 +85,18 @@ public class OrderService {
         }
 
         // ② 1인 구매 한도 수량 검사(P-O3). null=무제한(레거시 행). 재고 차감 전에 빠르게 거른다.
+        //    '누적' 기준(리뷰 M7): 이번 요청 + 기존 유효 주문(취소 제외) 수량의 합이 한도를 넘으면 거부.
+        //    과거엔 이번 주문 수량만 검사하고 누적은 "확정 후에도 안 지워지는 슬롯"이 대신 막았는데,
+        //    그 방식은 한도 2개 상품도 1회 구매 후 영구 차단되는 부작용(사실상 1인 1주문)이 있었다.
+        //    동시 중복 주문의 TOCTOU 는 여전히 ⑦의 슬롯 유니크 제약이 원자적으로 차단한다.
         Integer maxPerMember = goods.getMaxPurchasePerMember();
-        if (maxPerMember != null && quantity > maxPerMember) {
-            throw new PurchaseLimitExceededException(
-                "1인 구매 한도를 초과했습니다. 한도=" + maxPerMember + ", 요청 수량=" + quantity);
+        if (maxPerMember != null) {
+            long alreadyOrdered = orderItemRepository.sumActiveQuantityByMemberIdAndGoodsId(memberId, goodsId);
+            if (alreadyOrdered + quantity > maxPerMember) {
+                throw new PurchaseLimitExceededException(
+                    "1인 구매 한도를 초과했습니다. 한도=" + maxPerMember
+                        + ", 기주문(유효)=" + alreadyOrdered + ", 요청 수량=" + quantity);
+            }
         }
 
         // ③ 재고를 예약한다(P-S2: available-- reserved++). 같은 트랜잭션에 병합되어, 이후 단계 실패 시 함께 롤백된다.

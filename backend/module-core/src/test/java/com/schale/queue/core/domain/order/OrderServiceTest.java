@@ -164,6 +164,59 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("기주문 수량과 합쳐 한도를 넘으면 거부한다(리뷰 M7 — 누적 기준)")
+    void createOrder_rejects_when_cumulative_quantity_exceeds_limit() {
+        // given — 한도 2개 상품을 이미 1개 보유(유효 주문), 2개 추가 주문 시도
+        long memberId = 1L;
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .maxPurchasePerMember(2)
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+        given(orderItemRepository.sumActiveQuantityByMemberIdAndGoodsId(memberId, goodsId)).willReturn(1L);
+
+        // when & then — 1(기주문) + 2(요청) > 2(한도) → 거부, 재고 무접촉
+        assertThatThrownBy(() -> orderService.createOrder(memberId, goodsId, 2))
+            .isInstanceOf(PurchaseLimitExceededException.class);
+        then(stockService).should(never()).reserve(anyLong(), anyInt());
+    }
+
+    @Test
+    @DisplayName("기주문이 있어도 잔여 한도 내 재주문은 허용된다(리뷰 M7 — 확정 후 재구매)")
+    void createOrder_allows_reorder_within_remaining_limit() {
+        // given — 한도 2개 상품을 이미 1개 보유, 1개 추가 주문(잔여 한도 내)
+        long memberId = 1L;
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .maxPurchasePerMember(2)
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+        given(orderItemRepository.sumActiveQuantityByMemberIdAndGoodsId(memberId, goodsId)).willReturn(1L);
+        given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
+            Order saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 101L);
+            return saved;
+        });
+
+        // when
+        Order created = orderService.createOrder(memberId, goodsId, 1);
+
+        // then — 1(기주문) + 1(요청) = 2 ≤ 한도 → 정상 진행
+        assertThat(created.getOrderStatus()).isEqualTo(OrderStatus.PENDING);
+        then(stockService).should().reserve(goodsId, 1);
+    }
+
+    @Test
     @DisplayName("판매 시작(openAt) 전 주문은 SaleNotOpenException 으로 거부한다(UC-02, 리뷰 M5)")
     void createOrder_rejects_before_sale_opens() {
         // given — openAt 이 고정 Clock 기준 1분 뒤(아직 판매 전)

@@ -74,6 +74,9 @@ public class PaymentService {
 
         for (OrderItem item : orderItemRepository.findByOrderId(orderId)) {
             stockService.confirm(item.getGoodsId(), item.getQuantity());   // reserved→sold
+            // 슬롯 반납(리뷰 M7): 슬롯은 '활성(PENDING) 주문 1건' 동시성 장치다. 확정으로 활성 상태가
+            // 끝나면 반납해 한도 내 재구매를 허용한다. 누적 한도는 createOrder 의 누적 수량 검사가 막는다.
+            purchaseSlotRepository.deleteByMemberIdAndGoodsId(order.getMemberId(), item.getGoodsId());
         }
         payment.approve(approvalUid != null ? approvalUid : "SIM-" + orderId);
         order.changeStatus(OrderStatus.COMPLETED);

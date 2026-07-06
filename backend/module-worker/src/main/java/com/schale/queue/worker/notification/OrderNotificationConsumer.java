@@ -17,8 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
  * 라 같은 이벤트가 중복 전달될 수 있어, 처리 전에 {@code processed_event} 로 멱등을 가드한다:
  * <b>check(이미 처리?) → 알림 발송 → 처리 기록</b>. 이미 처리된 이벤트는 건너뛴다(이중 발송 차단).
  *
- * <p>알림(HTTP)은 DB 트랜잭션에 묶이지 않는다. 발송 성공 후 기록 커밋이 실패하는 드문 창에서는 재전달 시
- * 알림이 한 번 더 갈 수 있다(at-least-once + 드문 중복). 알림 도메인에서 드문 중복은 수용 가능하다.
+ * <p><b>전송 실패는 던진다(리뷰 M10)</b>: 과거엔 실패가 클라이언트 안에서 삼켜진 채 processed 로 확정되어
+ * 게이트웨이 순단 동안의 알림이 기록 없이 유실됐다. 지금은 전 경로(게이트웨이+웹훅) 실패 시
+ * {@link NotificationDeliveryException} 을 던져 컨테이너 재시도(지수 백오프 ~2분)로 순단을 흡수하고,
+ * 소진 시 DLT 에 영속 보존한다. 재시도로 인한 중복 발송은 게이트웨이 멱등 키가 차단하고,
+ * "발송 성공 후 기록 커밋 실패" 창의 드문 재발송도 같은 키로 무해하다.
  */
 @Component
 @RequiredArgsConstructor
@@ -43,7 +46,11 @@ public class OrderNotificationConsumer {
             return;
         }
         log.info("주문완료 이벤트 수신 eventId={} orderId={}", event.eventId(), event.orderId());
-        notifyGatewayClient.notifyOrderCompleted(event);
+        if (!notifyGatewayClient.notifyOrderCompleted(event)) {
+            // processed 마킹 없이 던진다 → 재시도(백오프) → 소진 시 DLT 영속 보존(리뷰 M10).
+            throw new NotificationDeliveryException(
+                "주문완료 알림 전송 실패 eventId=" + event.eventId() + " orderId=" + event.orderId());
+        }
         processedEventRepository.save(ProcessedEvent.of(event.eventId(), GROUP));
     }
 }

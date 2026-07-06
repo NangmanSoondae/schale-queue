@@ -39,7 +39,11 @@ public class OrderCancellationConsumer {
         }
         log.info("주문취소 이벤트 수신 eventId={} orderId={} reason={}",
             event.eventId(), event.orderId(), event.reason());
-        notifyGatewayClient.notifyOrderCancelled(event);
+        if (!notifyGatewayClient.notifyOrderCancelled(event)) {
+            // processed 마킹 없이 던진다 → 재시도(백오프) → 소진 시 DLT 영속 보존(리뷰 M10).
+            throw new NotificationDeliveryException(
+                "주문취소 알림 전송 실패 eventId=" + event.eventId() + " orderId=" + event.orderId());
+        }
         processedEventRepository.save(ProcessedEvent.of(event.eventId(), GROUP));
     }
 }

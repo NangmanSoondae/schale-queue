@@ -43,31 +43,43 @@ public class NotifyGatewayClient {
     private String webhookUrl;
 
     /**
-     * 주문 완료 알림을 전송한다. 1차 게이트웨이 → 실패 시 웹훅 폴백 → 둘 다 불가하면 건너뛴다(작업 흐름 무영향).
+     * 주문 완료 알림을 전송한다. 1차 게이트웨이 → 실패 시 웹훅 폴백.
      * 결제/정산성 상태 전이 알림이라 중복 발송이 해로움 — eventId 유도 멱등 키를 붙인다.
+     *
+     * @return 어느 경로로든 전송이 확인되면 {@code true}. {@code false} 면 호출측(컨슈머)이 실패를
+     *         확정 처리하지 말아야 한다(리뷰 M10 — 과거엔 실패가 조용히 삼켜진 뒤 processed 마킹됐다).
      */
-    public void notifyOrderCompleted(OrderCompletedEvent event) {
+    public boolean notifyOrderCompleted(OrderCompletedEvent event) {
         String message = String.format("🎫 주문 #%d 결제 완료 (회원 %d, 금액 %,d원)",
             event.orderId(), event.memberId(), event.totalAmount());
-        notify("[주문 완료]", message, "order-completed-" + event.eventId(), event.orderId());
+        return notify("[주문 완료]", message, "order-completed-" + event.eventId(), event.orderId());
     }
 
-    /** 주문 취소 알림을 전송한다(결제 만료 등). 전송 경로/폴백/멱등 정책은 주문 완료와 동일하다. */
-    public void notifyOrderCancelled(OrderCancelledEvent event) {
+    /** 주문 취소 알림을 전송한다(결제 만료 등). 전송 경로/폴백/멱등/반환 정책은 주문 완료와 동일하다. */
+    public boolean notifyOrderCancelled(OrderCancelledEvent event) {
         String message = String.format("❌ 주문 #%d 취소 (회원 %d, 사유 %s)",
             event.orderId(), event.memberId(), event.reason());
-        notify("[주문 취소]", message, "order-cancelled-" + event.eventId(), event.orderId());
+        return notify("[주문 취소]", message, "order-cancelled-" + event.eventId(), event.orderId());
     }
 
-    /** 1차 게이트웨이 → 실패 시 웹훅 폴백 → 둘 다 불가하면 건너뛴다(작업 흐름 무영향). */
-    private void notify(String title, String message, String idempotencyKey, Long orderId) {
+    /**
+     * 1차 게이트웨이 → 실패 시 웹훅 폴백. 둘 다 실패하면 {@code false} 를 반환해 호출측이
+     * 재시도/DLT 로 이어가게 한다(리뷰 M10). 두 경로 모두 '미설정'(로컬 개발 등)이면 발송할 곳이
+     * 없다는 뜻이므로 경고만 남기고 {@code true} 를 반환한다(재시도해도 결과가 같아 무의미).
+     */
+    private boolean notify(String title, String message, String idempotencyKey, Long orderId) {
+        if (gatewayUrl.isBlank() && webhookUrl.isBlank()) {
+            log.warn("알림 채널 미설정(게이트웨이·웹훅 모두) — 발송 생략. orderId={}", orderId);
+            return true;
+        }
         if (sendViaGateway(title, message, idempotencyKey, false)) {
-            return;
+            return true;
         }
         if (sendViaWebhook(message)) {
-            return;
+            return true;
         }
-        log.warn("알림 전송 경로 없음(게이트웨이·웹훅 미설정/도달불가) — 건너뜀. orderId={}", orderId);
+        log.warn("알림 전송 전 경로 실패(게이트웨이·웹훅) — 호출측 재시도 필요. orderId={}", orderId);
+        return false;
     }
 
     /**
