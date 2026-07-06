@@ -95,3 +95,28 @@ jobs:
       # 이미지 빌드 가능성만 검증한다(런타임 env 불필요 — compose 의 ${VAR} 는 컨테이너 실행 시 주입값).
       - name: Build images via compose
         run: docker compose --profile app build
+
+  frontend-build:
+    name: frontend build (React·Vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # tsc -b(타입 검사) + vite build 가 함께 돌아, 타입 오류도 머지 게이트에서 잡힌다.
+      - name: Install & build
+        run: |
+          npm ci
+          npm run lint
+          npm run build

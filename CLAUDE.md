@@ -90,11 +90,12 @@ schale-queue/
 ├── CLAUDE.md            # ← 이 파일 (상시 컨텍스트)
 ├── build.gradle         # 루트 빌드 (공통 설정)
 ├── settings.gradle      # 모듈 구성
-├── docker-compose.yml   # 로컬 인프라 (예정)
+├── docker-compose.yml   # 로컬 인프라 + 앱 컨테이너 (--profile app)
 ├── backend/
 │   ├── module-core/     # 도메인 · 영속성 (라이브러리)
-│   └── module-api/      # REST API (실행 모듈)
-├── frontend/            # React 클라이언트 (예정)
+│   ├── module-api/      # REST API (실행 모듈)
+│   └── module-worker/   # 대기열/이벤트 컨슈머 (실행 모듈)
+├── frontend/            # React 클라이언트 (Vite + TS, 대기열→주문 플로우)
 └── docs/
     ├── 1~6_*.md         # 기획 · 아키텍처 · 로드맵 · 환경 · 행동강령 · ADR
     ├── troubleshooting.md
