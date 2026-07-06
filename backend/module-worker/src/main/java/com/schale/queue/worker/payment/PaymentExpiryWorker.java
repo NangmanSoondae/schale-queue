@@ -25,9 +25,12 @@ public class PaymentExpiryWorker {
 
     private final PaymentService paymentService;
     private final Clock clock;
+    private final com.schale.queue.worker.health.WorkerLiveness liveness;
 
     @Scheduled(fixedDelayString = "${schale.payment.expiry-interval:10s}")
     public void sweep() {
+        // 생존 신고(리뷰2 H-2): 주기 10s + 최악 스윕 시간 여유 → 60s 못 돌아오면 wedge.
+        liveness.beat("payment-expiry", java.time.Duration.ofSeconds(60));
         List<Long> dueOrderIds = paymentService.findDueOrderIds(LocalDateTime.now(clock));
         if (dueOrderIds.isEmpty()) {
             return;

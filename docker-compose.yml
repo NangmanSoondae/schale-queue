@@ -164,6 +164,8 @@ services:
       NOTIFY_GATEWAY_URL: ${NOTIFY_GATEWAY_URL:-}
       NOTIFY_GATEWAY_API_KEY: ${NOTIFY_GATEWAY_API_KEY:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      # relaxed binding → schale.notify.required. 운영에선 true 로 미설정 배포를 기동 차단(리뷰2 M-12).
+      SCHALE_NOTIFY_REQUIRED: ${NOTIFY_REQUIRED:-false}
     # 종료 시 SIGKILL 유예. 진행 중 릴레이 배치/결제 만료 정리(lifecycle 20s)가 끝날 시간을 준다.
     stop_grace_period: 30s
     depends_on:
@@ -175,7 +177,9 @@ services:
         condition: service_healthy
     healthcheck:
       # 워커는 웹 서버가 없어 하트비트 파일(WorkerHeartbeat, 5s 주기)의 mtime 신선도로 판정한다.
-      # 스케줄러가 단일 스레드라 릴레이/만료 워커 wedge 시 하트비트도 멈춰 unhealthy 로 드러난다.
+      # wedge 감지는 WorkerLiveness 의 '작업별 생존 신고' 기반(리뷰2 H-2): 릴레이/만료 워커/큐 컨슈머
+      # 중 하나라도 기한 내 재신고를 못 하면 하트비트가 파일 갱신을 보류해 여기서 unhealthy 로 떨어진다.
+      # (VT 스케줄러는 작업마다 새 가상 스레드라 '단일 스레드 공유' 가정은 성립하지 않는다 — 구 주석 교정)
       test: ["CMD", "bash", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/worker-heartbeat) )) -lt 30"]
       interval: 15s
       timeout: 5s

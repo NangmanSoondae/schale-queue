@@ -30,6 +30,7 @@ public class QueueConsumer {
 
     private final QueueService queueService;
     private final QueueProperties properties;
+    private final com.schale.queue.worker.health.WorkerLiveness liveness;
 
     /**
      * 한 tick 의 소비 사이클. 활성 큐를 모두 돌며 {@code batchSize} 만큼 입장 처리한다.
@@ -43,6 +44,9 @@ public class QueueConsumer {
      */
     @Scheduled(fixedDelayString = "${schale.queue.consumer.interval:200ms}")
     public void drain() {
+        // 생존 신고(리뷰2 H-2): 이 작업이 고착되면 기한이 만료돼 하트비트가 멈춘다.
+        // 기한 = 주기(200ms) + 최악 실행 시간 여유. 30s 를 넘겨 못 돌아오면 wedge 로 본다.
+        liveness.beat("queue-consumer", java.time.Duration.ofSeconds(30));
         Set<Long> activeGoods = queueService.activeGoods();
         if (activeGoods.isEmpty()) {
             return;
