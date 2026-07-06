@@ -13,15 +13,17 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 워커 하트비트(리뷰 잔여 '워커 헬스체크 부재').
+ * 워커 하트비트(리뷰 잔여 '워커 헬스체크 부재' → 리뷰2 H-2 재설계).
  *
- * <p>워커는 웹 서버가 없어 HTTP 헬스체크가 불가하고, 릴레이는 <b>유일한 이벤트 발행자</b>라
- * wedge(스케줄러 스레드 고착)를 감지할 수단이 필요하다. 주기적으로 하트비트 파일을 갱신하고,
+ * <p>워커는 웹 서버가 없어 HTTP 헬스체크가 불가하다. 주기적으로 하트비트 파일을 갱신하고
  * 컨테이너 헬스체크가 <b>파일 mtime 신선도</b>를 검사한다.
  *
- * <p>스프링 기본 {@code TaskScheduler} 는 단일 스레드라 릴레이·만료 워커와 <b>같은 스레드</b>를
- * 공유한다 — 어느 @Scheduled 작업이든 wedge 되면 하트비트도 함께 멈춰 unhealthy 로 드러난다.
- * (별도 스레드로 빼면 "JVM 은 살아있지만 일은 멈춘" 상태를 놓친다 — 공유가 의도된 설계.)
+ * <p><b>wedge 감지(H-2)</b>: 초기 설계는 "기본 스케줄러 단일 스레드 공유"를 전제로 어떤 작업의
+ * 고착이든 하트비트 정지로 이어진다고 봤지만, 워커는 Virtual Threads 활성이라 Boot 가
+ * SimpleAsyncTaskScheduler(실행마다 새 가상 스레드)를 써 그 전제가 거짓이었다. 지금은
+ * {@link WorkerLiveness} 에 각 @Scheduled 작업이 실행 시작마다 기한을 신고하고, 하트비트는
+ * <b>모든 작업의 기한이 유효할 때만</b> 파일을 갱신한다 — 릴레이·만료 워커·큐 컨슈머 중 하나라도
+ * 고착되면 파일이 멈추고 컨테이너가 unhealthy 로 떨어진다(프로세스 사망 감지 포함).
  */
 @Component
 @RequiredArgsConstructor
@@ -30,12 +32,18 @@ public class WorkerHeartbeat {
     private static final Logger log = LoggerFactory.getLogger(WorkerHeartbeat.class);
 
     private final Clock clock;
+    private final WorkerLiveness liveness;
 
     @Value("${schale.worker.heartbeat-file:/tmp/worker-heartbeat}")
     private Path heartbeatFile;
 
     @Scheduled(fixedDelayString = "${schale.worker.heartbeat-interval:5s}")
     public void beat() {
+        if (!liveness.allAlive()) {
+            // 파일을 갱신하지 않는 것이 곧 unhealthy 신호다(mtime 이 낡아간다).
+            log.warn("하트비트 보류 — stale 작업 감지: [{}]", liveness.staleTasks());
+            return;
+        }
         try {
             Files.writeString(heartbeatFile, Instant.now(clock).toString());
         } catch (IOException e) {

@@ -37,7 +37,8 @@ class QueueConsumerTest {
     void setUp() {
         properties = new QueueProperties();
         properties.getConsumer().setBatchSize(50);
-        consumer = new QueueConsumer(queueService, properties);
+        consumer = new QueueConsumer(queueService, properties,
+            new com.schale.queue.worker.health.WorkerLiveness(java.time.Clock.systemUTC()));
     }
 
     @Test

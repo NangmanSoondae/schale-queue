@@ -42,6 +42,38 @@ public class NotifyGatewayClient {
     @Value("${DISCORD_WEBHOOK_URL:}")
     private String webhookUrl;
 
+    /** 운영 프로파일에서 true — 발송 가능 채널이 하나도 없으면 기동을 실패시킨다(리뷰2 M-12 fail-fast). */
+    @Value("${schale.notify.required:false}")
+    private boolean notifyRequired;
+
+    /**
+     * 부팅 시 채널 설정을 검증한다(리뷰2 M-12/M-13). 잘못된 .env 배포가 "정상 기동 + 알림 전량
+     * 무기록 소멸(M-12)" 또는 "전 이벤트 2분 백오프 → DLT 침몰(M-13)"로 조용히 진행되는 것을,
+     * 최소한 배포 시점의 ERROR(또는 기동 실패)로 드러낸다.
+     */
+    @jakarta.annotation.PostConstruct
+    void validateChannels() {
+        if (gatewayUrl.isBlank() != apiKey.isBlank()) {
+            // URL·키 한쪽만 설정 = 십중팔구 .env 오타/누락. 게이트웨이 경로는 비활성으로 취급된다(M-13).
+            log.error("알림 게이트웨이 설정 불완전 — URL/API키 중 한쪽만 설정됨. 게이트웨이 경로 비활성 "
+                + "(url설정={}, key설정={})", !gatewayUrl.isBlank(), !apiKey.isBlank());
+        }
+        if (!hasDeliverableChannel()) {
+            if (notifyRequired) {
+                throw new IllegalStateException(
+                    "발송 가능한 알림 채널이 없습니다(schale.notify.required=true). "
+                        + "NOTIFY_GATEWAY_URL+KEY 또는 DISCORD_WEBHOOK_URL 을 설정하세요.");
+            }
+            log.error("발송 가능한 알림 채널 없음 — 모든 주문 알림이 기록 없이 생략됩니다(로컬 개발 전용 상태). "
+                + "운영에서는 schale.notify.required=true 로 기동 차단을 권장");
+        }
+    }
+
+    /** 실제로 발송을 시도할 수 있는 채널이 하나라도 있는가(게이트웨이는 URL+키 둘 다 필요). */
+    private boolean hasDeliverableChannel() {
+        return (!gatewayUrl.isBlank() && !apiKey.isBlank()) || !webhookUrl.isBlank();
+    }
+
     /**
      * 주문 완료 알림을 전송한다. 1차 게이트웨이 → 실패 시 웹훅 폴백.
      * 결제/정산성 상태 전이 알림이라 중복 발송이 해로움 — eventId 유도 멱등 키를 붙인다.
@@ -68,8 +100,11 @@ public class NotifyGatewayClient {
      * 없다는 뜻이므로 경고만 남기고 {@code true} 를 반환한다(재시도해도 결과가 같아 무의미).
      */
     private boolean notify(String title, String message, String idempotencyKey, Long orderId) {
-        if (gatewayUrl.isBlank() && webhookUrl.isBlank()) {
-            log.warn("알림 채널 미설정(게이트웨이·웹훅 모두) — 발송 생략. orderId={}", orderId);
+        // '발송 가능 경로' 기준 게이트(리뷰2 M-13): 과거엔 URL만 있고 키가 없는 부분 설정이 이 게이트를
+        // 통과해 게이트웨이 false → 웹훅 false → 예외 → 전 이벤트가 2분 백오프 후 DLT 로 침몰했다.
+        // 부분 설정은 부팅 ERROR(validateChannels)로 드러나고, 여기서는 미설정과 동일하게 생략한다.
+        if (!hasDeliverableChannel()) {
+            log.warn("발송 가능한 알림 채널 없음 — 발송 생략. orderId={}", orderId);
             return true;
         }
         if (sendViaGateway(title, message, idempotencyKey, false)) {

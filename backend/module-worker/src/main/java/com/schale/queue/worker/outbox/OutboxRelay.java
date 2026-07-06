@@ -47,6 +47,7 @@ public class OutboxRelay {
     private final EventOutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final Clock clock;
+    private final com.schale.queue.worker.health.WorkerLiveness liveness;
 
     /** broker ack 대기 상한. 무기한 대기(리뷰 M2)가 릴레이 스레드를 브로커 다운 내내 묶는 것을 막는다. */
     @Value("${schale.outbox.send-timeout:10s}")
@@ -54,11 +55,18 @@ public class OutboxRelay {
 
     @Scheduled(fixedDelayString = "${schale.outbox.relay-interval:500ms}")
     public void relay() {
+        // 생존 신고(리뷰2 H-2): 유일한 발행자라 wedge 감지가 가장 중요하다.
+        // 기한 = 주기(500ms) + 최악 실행(타임아웃 걸린 send ~10s + 마킹) 여유 → 60s.
+        liveness.beat("outbox-relay", Duration.ofSeconds(60));
         List<EventOutbox> pending = outboxRepository.findTop100ByStatusOrderByIdAsc(OutboxStatus.PENDING);
         if (pending.isEmpty()) {
             return;
         }
         List<Long> sentIds = new ArrayList<>(pending.size());
+        // 인터럽트 플래그는 markSent 완료 후에 복원한다(리뷰2 M-11): 복원된 상태로 JDBC 커넥션을
+        // 획득하면 실패해 '이미 ack 받은 행'의 마킹이 유실되고, graceful shutdown(스케줄러가 실행 중
+        // 작업을 인터럽트) 때마다 그 행들이 재발행됐다(멱등이 흡수하지만 의도 무산 + 오도 로그).
+        boolean interrupted = false;
         for (EventOutbox row : pending) {
             try {
                 // ack 를 동기로 기다려, 발행이 확정된 행만 SENT 후보에 올린다(실패 시 PENDING 유지 → 다음 틱).
@@ -66,9 +74,9 @@ public class OutboxRelay {
                     .get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
                 sentIds.add(row.getId());
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("아웃박스 발행 중단 eventId={} → 다음 틱 재시도", row.getEventId(), e);
-                break;   // 인터럽트 시 남은 행은 다음 틱으로 미룬다
+                interrupted = true;
+                log.warn("아웃박스 발행 중단(인터럽트) eventId={} → 기발행분 마킹 후 종료", row.getEventId());
+                break;   // 남은 행은 다음 틱(또는 재기동 후)으로 미룬다
             } catch (TimeoutException e) {
                 // 브로커 응답 지연 — 이 틱은 여기서 끊는다(나머지도 같은 브로커라 기다려봐야 손해).
                 // 실제로는 도달했을 수 있으나(중복 발행 창) 컨슈머 멱등이 흡수한다.
@@ -81,10 +89,16 @@ public class OutboxRelay {
                 // sentIds 미포함 → PENDING 유지
             }
         }
-        if (!sentIds.isEmpty()) {
-            // 짧은 벌크 UPDATE 하나로 마킹 — DB 커넥션은 이 순간에만 점유된다(리뷰 M2).
-            outboxRepository.markSent(sentIds, LocalDateTime.now(clock));
+        try {
+            if (!sentIds.isEmpty()) {
+                // 짧은 벌크 UPDATE 하나로 마킹 — DB 커넥션은 이 순간에만 점유된다(리뷰 M2).
+                outboxRepository.markSent(sentIds, LocalDateTime.now(clock));
+            }
+            log.info("아웃박스 발행 {}건 (대상 {}건)", sentIds.size(), pending.size());
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
-        log.info("아웃박스 발행 {}건 (대상 {}건)", sentIds.size(), pending.size());
     }
 }
