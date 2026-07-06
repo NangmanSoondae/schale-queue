@@ -26,6 +26,7 @@ export async function subscribeQueueStream(
       signal,
     })
     if (!res.ok || !res.body) {
+      res.body?.cancel().catch(() => {})   // 미소비 응답 본문의 커넥션 잔류 방지
       handlers.onError(new Error(`SSE 연결 실패 (HTTP ${res.status})`))
       return
     }
@@ -54,14 +55,23 @@ export async function subscribeQueueStream(
         }
         if (dataLines.length === 0) continue
 
-        const data = JSON.parse(dataLines.join('\n'))
+        // 이벤트 단위 파싱 가드: 비정상 프레임 1건이 스트림 전체를 죽이지 않게 해당 이벤트만 스킵.
+        let data
+        try {
+          data = JSON.parse(dataLines.join('\n'))
+        } catch {
+          continue
+        }
         if (eventName === 'position') handlers.onPosition(data)
         else if (eventName === 'admitted') {
           admitted = true
           handlers.onAdmitted(data)
         }
       }
-      if (admitted) return // admitted 후 스트림은 서버가 닫는다 — 더 읽지 않는다.
+      if (admitted) {
+        reader.cancel().catch(() => {})   // 이탈 통지 겸 리소스 정리(언마운트 abort 에만 의존하지 않음)
+        return // admitted 후 스트림은 서버가 닫는다 — 더 읽지 않는다.
+      }
     }
     handlers.onClose()
   } catch (err) {

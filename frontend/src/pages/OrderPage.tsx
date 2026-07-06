@@ -18,16 +18,23 @@ export default function OrderPage() {
   const { goodsId } = useParams()
   const { memberId } = useMember()
   const [goods, setGoods] = useState<GoodsResponse | null>(null)
+  const [goodsError, setGoodsError] = useState(false)
   const [quantity, setQuantity] = useState(1)
   const [step, setStep] = useState<Step>({ name: 'ordering' })
   const [error, setError] = useState<{ code: string; message: string } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api<GoodsResponse>(`/api/v1/goods/${goodsId}`).then(setGoods).catch(() => setGoods(null))
+    // 조회 실패를 조용히 '1개 캡'으로 뭉개지 않는다(리뷰2 M-10) — 오류 UI 로 구분.
+    api<GoodsResponse>(`/api/v1/goods/${goodsId}`)
+      .then(setGoods)
+      .catch(() => setGoodsError(true))
   }, [goodsId])
 
-  const maxQuantity = goods?.maxPurchasePerMember ?? 1
+  // 한도 null = 무제한(백엔드 계약, 상세 화면 '제한 없음' 표기와 정합 — 리뷰2 M-10).
+  // 무제한이어도 셀렉트 UI 는 표시 상한이 필요하다 — 1로 캡하던 과거 동작(계약 모순)을 교정.
+  const UNLIMITED_DISPLAY_CAP = 10
+  const maxQuantity = goods ? (goods.maxPurchasePerMember ?? UNLIMITED_DISPLAY_CAP) : 1
 
   const placeOrder = async () => {
     setBusy(true)
@@ -64,6 +71,15 @@ export default function OrderPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (goodsError) {
+    return (
+      <section className="order-panel">
+        <p className="notice error">상품 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</p>
+        <Link className="back" to={`/goods/${goodsId}`}>← 상품으로 돌아가기</Link>
+      </section>
+    )
   }
 
   if (step.name === 'done') {
