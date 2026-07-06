@@ -36,7 +36,8 @@ import org.springframework.boot.test.context.SpringBootTest;
  *
  * <p><b>증명 목표</b>: 같은 결제를 동시에 확정·만료하려 해도 비관적 락 + 상태 재확인으로 <b>정확히 한
  * 전이만</b> 일어나고, 재고 합계 불변식(P-S1)이 유지된다. 승자에 따라 (PAID·COMPLETED·sold) 또는
- * (EXPIRED·CANCELLED·available 복원·슬롯 반납) 중 하나로 <b>일관되게</b> 귀결된다.
+ * (EXPIRED·CANCELLED·available 복원) 중 하나로 <b>일관되게</b> 귀결되며, 슬롯은 어느 쪽이든
+ * 반납된다(리뷰 M7 — 활성 주문 종료).
  */
 @SpringBootTest(classes = CoreTestApplication.class)
 @EnabledIfEnvironmentVariable(named = "RUN_DB_IT", matches = "true")
@@ -140,7 +141,9 @@ class PaymentLifecycleConcurrencyTest {
             assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.COMPLETED);
             assertThat(stock.getSoldQuantity()).isEqualTo(QTY);
             assertThat(stock.getAvailableQuantity()).isEqualTo(TOTAL - QTY);
-            assertThat(purchaseSlotRepository.count()).as("확정 시 슬롯 유지").isEqualTo(1);
+            // 리뷰 M7: 슬롯은 '활성(PENDING) 1건' 장치 — 확정으로 활성이 끝나면 반납된다.
+            // 누적 한도는 createOrder 의 유효 수량 합산이 담당하므로 반납이 P-O3 를 약화시키지 않는다.
+            assertThat(purchaseSlotRepository.count()).as("확정 시 슬롯 반납(M7)").isZero();
         } else {
             assertThat(order.getOrderStatus()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(stock.getSoldQuantity()).isZero();
