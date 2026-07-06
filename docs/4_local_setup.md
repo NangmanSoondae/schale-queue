@@ -135,3 +135,22 @@ docker compose --profile app down
 - **시크릿**: `DB_PASSWORD` 등은 이미지에 굽지 않고 `.env` 에서 런타임 주입한다(§5.3.2). 실행 전 `cp .env.example .env` 후 값을 채운다.
 
 > ⚠️ **이미지 캐시**: 소스를 바꾼 뒤엔 `--build` 를 붙여야 새 코드가 반영된다. 안 붙이면 이전 이미지로 뜬다.
+
+## 4.6. 프론트엔드 데모 실행 (Phase 5)
+
+React 프론트(대기열 → 주문 → 결제 플로우)를 로컬에서 돌려보는 절차.
+
+```bash
+# 1) 백엔드 기동 — 풀스택(4.5) 권장. worker 가 떠 있어야 대기열이 소비되어 '입장'이 발생한다.
+docker compose --profile app up -d --build
+
+# 2) 데모 시드 적용 (⚠️ 기존 주문/재고/회원 데이터 초기화 — 로컬 전용)
+docker compose exec -T mariadb sh -c 'mariadb -uschale -p"$MARIADB_PASSWORD" schale_queue' < load/seed/demo_seed.sql
+
+# 3) 프론트 개발 서버
+cd frontend && npm install && npm run dev   # http://localhost:5173
+```
+
+- **API 프록시**: 개발 서버가 `/api` 를 `http://localhost:8080` 으로 프록시한다(CORS 우회). API 포트를 바꿨다면 `VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev`.
+- **회원 식별**: 인증이 없으므로 첫 방문 시 1~1000 범위 무작위 회원 ID 를 발급해 localStorage 에 보관한다(데모 시드의 회원 범위와 일치). 헤더의 입력란에서 바꿀 수 있다 — 서로 다른 브라우저/시크릿 창으로 다중 대기 시연 가능.
+- **SSE**: 대기 순번은 `X-Member-Id` 헤더가 필요해 EventSource 대신 fetch 스트리밍으로 구독한다.
