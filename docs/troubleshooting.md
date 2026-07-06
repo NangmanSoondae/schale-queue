@@ -430,3 +430,43 @@ org.springframework.web.context.request.async.AsyncRequestNotUsableException: Se
 
 ### 5) 결과 (Result)
 동일 벤치 재실행 시 ERROR 오탐 0건. SSE 대량 이탈은 debug 레벨로만 관측된다. 교훈: **catch-all 을 두는 순간, "예외지만 오류가 아닌 것"(클라이언트 이탈, 취소)을 명시적으로 골라내는 짝 핸들러가 반드시 따라와야 한다.** 부하테스트는 기능 결함만이 아니라 이런 관측성 결함도 드러낸다.
+
+---
+
+## [No.14] CI 레드인데 머지됨 — 파이프가 삼킨 exit code 가 머지 게이트를 무력화
+
+- **일자**: 2026-07-06
+- **관련 Phase**: Phase 5 이후 (백로그 정리)
+- **태그**: `#CI` `#프로세스` `#GitHubFlow` `#셸`
+
+### 1) 발견 (Discovery)
+> 백로그 PR #33 머지 직후 체크 로그를 보니 `build & test` 잡이 **fail** 인데 머지가 실행돼 있었다.
+
+```
+build & test (JDK 21)	fail	1m36s	https://github.com/.../job/85300828543
+docker image build (api·worker)	pass	...
+(그리고 이어서) d882547 fix(core,worker): 리뷰 백로그 M2·M7·M10 종결 ... (#33)   ← 레드인데 main 진입
+```
+
+실패 원인 자체는 `PaymentLifecycleConcurrencyTest` 가 구 시맨틱("확정 시 슬롯 유지")을 단언 — M7(확정 시 슬롯 반납)과 충돌.
+
+### 2) 분석 (Analysis)
+머지 명령이 `gh pr checks 33 --watch 2>&1 | tail -4 && gh pr merge ...` 형태였다. **파이프라인의 exit code 는 마지막 명령(tail)의 것**이므로, `gh pr checks` 가 실패(비 0)를 반환해도 `tail` 이 0 을 돌려줘 `&&` 게이트가 통과했다. 즉 §5.3.5 의 "CI 그린 확인 후 머지"가 **표시용 출력은 남기면서 판정 기능은 잃은** 상태였다. 이전 PR 들이 전부 그린이어서 이 결함이 잠복해 있었다. 부차적 원인: 게이트 IT(RUN_DB_IT)는 CI 전용 env 라 로컬 `./gradlew build` 로는 재현되지 않았다.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — 파이프 제거**: `gh pr checks --watch` 를 단독 실행하고 exit code 를 변수로 받아 분기. 단순·확실. 출력 요약은 실패 시에만 다시 조회.
+- **방안 B — `set -o pipefail`**: 파이프 전체의 실패를 전파. 셸 세션마다 잊지 않고 켜야 하고, Git Bash 비대화 실행에서 누락되기 쉽다.
+- **방안 C — GitHub branch protection 서버 강제**: 근본적이지만 무료 플랜 + 비공개 레포 제약(§5.3.5 에 기록된 403)으로 불가 — 클라이언트 게이트가 유일한 방어선이라 A 가 필수.
+
+### 4) 해결 (Resolution)
+방안 A 채택. 머지 게이트를 다음 패턴으로 고정한다(§5.3.5 운용 규칙):
+
+```bash
+gh pr checks <PR> --watch > /dev/null 2>&1; CHECKS_EXIT=$?
+if [ "$CHECKS_EXIT" -eq 0 ]; then gh pr merge <PR> --squash --delete-branch; else echo "CI RED — 머지 중단"; gh pr checks <PR>; fi
+```
+
+사고 자체는 fix-forward: 충돌 단언을 새 시맨틱으로 갱신한 #34 를 위 패턴으로 그린 머지해 main 을 복구했다. 아울러 core 도메인 시맨틱 변경 시, CI 전용 게이트 IT(RUN_DB_IT/RUN_REDIS_IT)를 **로컬에서도 선행 실행**하는 것을 체크리스트에 추가한다(app 컨테이너 정지 후 — 만료 워커 간섭, No. 기록 참조).
+
+### 5) 결과 (Result)
+#34 CI 그린 확인 후 머지, main `f199a1f` 로 복구 완료. 교훈: **게이트는 '보이는 출력'이 아니라 'exit code'다.** 출력 가공(pipe)을 판정 경로에 끼워 넣는 순간 게이트는 장식이 된다. 레드 머지 창(약 25분) 동안 배포·후속 분기는 없었어서 실피해는 없었다.
