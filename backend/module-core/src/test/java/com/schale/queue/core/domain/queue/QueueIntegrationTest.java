@@ -97,6 +97,31 @@ class QueueIntegrationTest {
     }
 
     @Test
+    @DisplayName("스냅샷 벌크 조회: 순번-회원 대응이 요청 순서와 무관하게 정확하고, 총원은 같은 왕복 값이다(리뷰2 M-6·L-5)")
+    void positions_snapshot_maps_ranks_to_correct_members() {
+        // given — 1 → 2 → 3 순서로 진입(순번 1, 2, 3)
+        AdjustableClock clock = new AdjustableClock(Instant.parse("2026-06-24T00:00:00Z"));
+        QueueService queue = new QueueService(redis, clock, new QueueProperties());
+        queue.enqueue(GOODS, 1L);
+        clock.advance(Duration.ofSeconds(1));
+        queue.enqueue(GOODS, 2L);
+        clock.advance(Duration.ofSeconds(1));
+        queue.enqueue(GOODS, 3L);
+
+        // when — 뒤섞인 순서 + 부재 회원(99)을 섞어 벌크 조회(파이프라인 결과↔회원 대응 검증)
+        QueueService.QueueSnapshot snapshot =
+            queue.getPositionsSnapshot(GOODS, java.util.List.of(3L, 99L, 1L, 2L));
+
+        // then — 각 회원이 '자기' 순번을 받는다(다른 회원 순번 전파 = 회귀 시 즉시 레드)
+        assertThat(snapshot.positions())
+            .containsEntry(1L, 1L)
+            .containsEntry(2L, 2L)
+            .containsEntry(3L, 3L)
+            .doesNotContainKey(99L);
+        assertThat(snapshot.waiting()).isEqualTo(3L);
+    }
+
+    @Test
     @DisplayName("P-Q2: 이미 대기 중인 회원의 재진입은 무시되고 기존 순번을 유지한다")
     void duplicate_enqueue_keeps_original_position() {
         // given — 1번이 먼저, 2번이 나중에 진입
