@@ -259,6 +259,35 @@ class OrderServiceTest {
     }
 
     @Test
+    @DisplayName("선검사(스냅샷)를 통과해도 잠금 재검사(최신 커밋)가 초과를 감지하면 거부한다(리뷰2 H-1)")
+    void createOrder_rejects_when_locking_recheck_detects_over_limit() {
+        // given — 한도 2. 스냅샷 SUM=0(선검사 통과)이지만, 잠금 읽기는 끼어든 커밋+자기 주문 = 3 반환
+        long memberId = 1L;
+        long goodsId = 10L;
+        Goods goods = Goods.builder()
+            .name("한정 굿즈")
+            .price(19_000L)
+            .openAt(LocalDateTime.ofInstant(FIXED_INSTANT, ZoneOffset.UTC).minusMinutes(1))
+            .maxPurchasePerMember(2)
+            .build();
+        given(goodsRepository.findById(goodsId)).willReturn(Optional.of(goods));
+        given(clock.instant()).willReturn(FIXED_INSTANT);
+        given(clock.getZone()).willReturn(ZoneOffset.UTC);
+        given(orderItemRepository.sumActiveQuantityByMemberIdAndGoodsId(memberId, goodsId)).willReturn(0L);
+        given(orderItemRepository.sumActiveQuantityForUpdate(memberId, goodsId)).willReturn(3L);
+        given(orderRepository.save(any(Order.class))).willAnswer(invocation -> {
+            Order saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 103L);
+            return saved;
+        });
+
+        // when & then — 슬롯까지 점유한 뒤라도 최종 재검사가 던져 전체 롤백을 유도한다
+        assertThatThrownBy(() -> orderService.createOrder(memberId, goodsId, 2))
+            .isInstanceOf(PurchaseLimitExceededException.class)
+            .hasMessageContaining("동시 주문 감지");
+    }
+
+    @Test
     @DisplayName("판매 시작(openAt) 전 주문은 SaleNotOpenException 으로 거부한다(UC-02, 리뷰 M5)")
     void createOrder_rejects_before_sale_opens() {
         // given — openAt 이 고정 Clock 기준 1분 뒤(아직 판매 전)

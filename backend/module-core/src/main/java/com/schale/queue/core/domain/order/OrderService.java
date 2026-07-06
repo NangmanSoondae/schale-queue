@@ -84,11 +84,11 @@ public class OrderService {
                 "판매 시작 전입니다. goodsId=" + goodsId + ", openAt=" + goods.getOpenAt());
         }
 
-        // ② 1인 구매 한도 수량 검사(P-O3). null=무제한(레거시 행). 재고 차감 전에 빠르게 거른다.
+        // ② 1인 구매 한도 '선검사'(P-O3). null=무제한(레거시 행). 재고 차감 전에 빠르게 거른다.
         //    '누적' 기준(리뷰 M7): 이번 요청 + 기존 유효 주문(취소 제외) 수량의 합이 한도를 넘으면 거부.
-        //    과거엔 이번 주문 수량만 검사하고 누적은 "확정 후에도 안 지워지는 슬롯"이 대신 막았는데,
-        //    그 방식은 한도 2개 상품도 1회 구매 후 영구 차단되는 부작용(사실상 1인 1주문)이 있었다.
-        //    동시 중복 주문의 TOCTOU 는 여전히 ⑦의 슬롯 유니크 제약이 원자적으로 차단한다.
+        //    ⚠️ 이 검사는 REPEATABLE READ 스냅샷 읽기라 최종 권위가 아니다 — 내 스냅샷 이후 커밋된
+        //    타 주문(+confirm 의 슬롯 반납)은 못 본다(리뷰2 H-1). 최종 판정은 ⑧의 잠금 재검사가 한다.
+        //    여기서는 명백한 초과를 재고 락 진입 전에 싸게 거르는 fail-fast 역할만 남긴다.
         Integer maxPerMember = goods.getMaxPurchasePerMember();
         if (maxPerMember != null) {
             long alreadyOrdered = orderItemRepository.sumActiveQuantityByMemberIdAndGoodsId(memberId, goodsId);
@@ -133,6 +133,7 @@ public class OrderService {
 
         // ⑦ 활성 구매 슬롯을 점유한다(P-O3 동시성). (member, goods) 유니크 제약이 같은 회원의 동시
         //    중복 주문을 DB 차원에서 원자적으로 차단한다. 충돌 시 트랜잭션 전체가 롤백돼 재고가 복구된다.
+        //    이 INSERT 가 같은 (member, goods) 의 활성 생성 경로를 직렬화하는 지점이기도 하다(⑧의 전제).
         try {
             purchaseSlotRepository.saveAndFlush(PurchaseSlot.builder()
                 .memberId(memberId)
@@ -142,6 +143,22 @@ public class OrderService {
         } catch (DataIntegrityViolationException e) {
             throw new PurchaseLimitExceededException(
                 "이미 진행 중인 주문이 있습니다(1인 1주문). memberId=" + memberId + ", goodsId=" + goodsId);
+        }
+
+        // ⑧ 누적 한도 '최종 재검사' — 잠금 읽기(FOR UPDATE = 최신 커밋 기준, 리뷰2 H-1).
+        //    ②의 스냅샷 SUM 은 "내 스냅샷 이후 커밋 + confirm 슬롯 반납" 인터리빙(재고 락 대기 중
+        //    타 주문이 생성·확정되는 경우)을 못 본다. 슬롯 직렬화(⑦) 이후 최신 커밋본을 잠금 읽기로
+        //    재합산해, 초과면 전체 롤백한다(재고·슬롯 원복). 자기 주문 행이 포함되므로 비교식은 초과 여부.
+        //    saveAndFlush(⑦)가 컨텍스트 전체를 flush 했고 네이티브 쿼리 전 auto-flush 도 걸리므로
+        //    자기 행 누락은 없다.
+        if (maxPerMember != null) {
+            Long lockedSum = orderItemRepository.sumActiveQuantityForUpdate(memberId, goodsId);
+            long committedTotal = lockedSum != null ? lockedSum : 0L;   // coalesce 라 실 DB 에선 null 불가(방어)
+            if (committedTotal > maxPerMember) {
+                throw new PurchaseLimitExceededException(
+                    "1인 구매 한도를 초과했습니다(동시 주문 감지). 한도=" + maxPerMember
+                        + ", 유효 합계=" + committedTotal);
+            }
         }
 
         return order;
