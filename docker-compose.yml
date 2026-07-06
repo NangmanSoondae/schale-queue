@@ -9,14 +9,23 @@
 #  실행: docker-compose up -d   /   종료: docker-compose down
 # ============================================================================
 
+# 컨테이너 로그 로테이션 공통 설정(리뷰 잔여 LOW — 무제한 json 로그가 디스크를 잠식하는 것 방지).
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   mariadb:
     image: mariadb:10.6
     container_name: schale-mariadb
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 768m          # per-container 상한(No.07): 단일 컨테이너가 Docker VM 전체 메모리를 굶기지 못하게 격리
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"   # 루프백 한정(리뷰 잔여 LOW — LAN 노출 차단). 컨테이너 간은 내부 네트워크 사용
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
       MARIADB_DATABASE: ${DB_NAME}
@@ -35,10 +44,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: schale-redis
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 256m          # per-container 상한(No.07)
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"   # 루프백 한정(무비밀번호 Redis LAN 노출 차단)
     command: ["redis-server", "--appendonly", "yes"]   # AOF 영속화 활성
     volumes:
       - schale-redis-data:/data
@@ -53,10 +63,11 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     container_name: schale-kafka
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 1536m         # per-container 상한(No.07): JVM 힙(아래)+페이지캐시 여유 포함. VM 굶김 방지
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"   # 루프백 한정(호스트용 EXTERNAL 리스너)
     environment:
       # JVM 힙 상한 고정(No.07): 미지정 시 Kafka 기본(~1G)이지만 명시해 예측 가능하게 못박는다.
       # 로컬 단일노드·소량 토픽엔 충분. 무제한 힙이 Docker Desktop VM 을 굶겨 크래시시키던 벡터를 제거.
@@ -100,6 +111,7 @@ services:
       context: .
       dockerfile: backend/module-api/Dockerfile
     container_name: schale-api
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 768m          # per-container 상한(No.07 일관성)
     ports:
@@ -138,6 +150,7 @@ services:
       context: .
       dockerfile: backend/module-worker/Dockerfile
     container_name: schale-worker
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 768m          # per-container 상한(No.07 일관성)
     environment:
@@ -160,6 +173,14 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+    healthcheck:
+      # 워커는 웹 서버가 없어 하트비트 파일(WorkerHeartbeat, 5s 주기)의 mtime 신선도로 판정한다.
+      # 스케줄러가 단일 스레드라 릴레이/만료 워커 wedge 시 하트비트도 멈춰 unhealthy 로 드러난다.
+      test: ["CMD", "bash", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/worker-heartbeat) )) -lt 30"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
   # ==========================================================================
   #  frontend — React 정적 빌드 + nginx (Phase 5)
@@ -171,6 +192,7 @@ services:
     build:
       context: ./frontend
     container_name: schale-frontend
+    <<: *default-logging
     restart: unless-stopped
     mem_limit: 128m          # 정적 서빙 nginx — 소형 상한이면 충분
     ports:

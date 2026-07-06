@@ -57,12 +57,41 @@ public class Goods extends BaseTimeEntity {
     @Column(name = "max_purchase_per_member")
     private Integer maxPurchasePerMember;
 
+    /**
+     * 결제창 수명(분, P-O2 — 기본 10, 허용 1~30). 인기 드랍의 예약 재고 회수 속도를 운영자가
+     * 조절하는 손잡이다(11_domain_policy §11.3 보충). M6 교훈에 따라 기본값 강제는 빌더가 담당하고,
+     * 레거시 NULL 행은 {@link #paymentTimeout()} 이 기본 10분으로 해석한다.
+     */
+    @Column(name = "payment_timeout_minutes")
+    private Integer paymentTimeoutMinutes;
+
+    /** P-O2 기본/허용 범위. */
+    private static final int PAYMENT_TIMEOUT_DEFAULT_MINUTES = 10;
+    private static final int PAYMENT_TIMEOUT_MIN_MINUTES = 1;
+    private static final int PAYMENT_TIMEOUT_MAX_MINUTES = 30;
+
     @Builder
-    private Goods(String name, String description, Long price, LocalDateTime openAt, Integer maxPurchasePerMember) {
+    private Goods(String name, String description, Long price, LocalDateTime openAt,
+                  Integer maxPurchasePerMember, Integer paymentTimeoutMinutes) {
+        if (paymentTimeoutMinutes != null
+            && (paymentTimeoutMinutes < PAYMENT_TIMEOUT_MIN_MINUTES
+                || paymentTimeoutMinutes > PAYMENT_TIMEOUT_MAX_MINUTES)) {
+            throw new IllegalArgumentException(
+                "결제 타임아웃은 " + PAYMENT_TIMEOUT_MIN_MINUTES + "~" + PAYMENT_TIMEOUT_MAX_MINUTES
+                    + "분이어야 합니다(P-O2). 입력=" + paymentTimeoutMinutes);
+        }
         this.name = name;
         this.description = description;
         this.price = price;
         this.openAt = openAt;
         this.maxPurchasePerMember = maxPurchasePerMember != null ? maxPurchasePerMember : 1;
+        this.paymentTimeoutMinutes =
+            paymentTimeoutMinutes != null ? paymentTimeoutMinutes : PAYMENT_TIMEOUT_DEFAULT_MINUTES;
+    }
+
+    /** 결제창 수명(P-O2). 레거시 NULL 행은 기본 10분으로 해석한다. */
+    public java.time.Duration paymentTimeout() {
+        int minutes = paymentTimeoutMinutes != null ? paymentTimeoutMinutes : PAYMENT_TIMEOUT_DEFAULT_MINUTES;
+        return java.time.Duration.ofMinutes(minutes);
     }
 }

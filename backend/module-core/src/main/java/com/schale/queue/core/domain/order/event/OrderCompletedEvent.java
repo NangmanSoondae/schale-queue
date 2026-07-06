@@ -30,6 +30,10 @@ public record OrderCompletedEvent(
     public static final String TOPIC = "order.completed";
 
     public static OrderCompletedEvent of(Long orderId, Long memberId, Long totalAmount) {
-        return new OrderCompletedEvent(UUID.randomUUID().toString(), orderId, memberId, totalAmount, LocalDateTime.now());
+        // 시간 출처 통일(리뷰 '시간대 3원화'): 도메인 Clock(UTC, TimeConfig)과 같은 출처로 기록한다.
+        // 정적 팩토리라 빈 주입 대신 동일 출처(systemUTC)를 직접 쓴다.
+        return new OrderCompletedEvent(
+            UUID.randomUUID().toString(), orderId, memberId, totalAmount,
+            LocalDateTime.now(java.time.Clock.systemUTC()));
     }
 }

@@ -470,3 +470,42 @@ if [ "$CHECKS_EXIT" -eq 0 ]; then gh pr merge <PR> --squash --delete-branch; els
 
 ### 5) 결과 (Result)
 #34 CI 그린 확인 후 머지, main `f199a1f` 로 복구 완료. 교훈: **게이트는 '보이는 출력'이 아니라 'exit code'다.** 출력 가공(pipe)을 판정 경로에 끼워 넣는 순간 게이트는 장식이 된다. 레드 머지 창(약 25분) 동안 배포·후속 분기는 없었어서 실피해는 없었다.
+
+---
+
+## [No.15] 게이트 IT 가 로컬에서 조용히 스킵됨 — Gradle 데몬이 낡은 환경변수를 재사용
+
+- **일자**: 2026-07-06
+- **관련 Phase**: Phase 5 이후 (백로그 정리)
+- **태그**: `#Gradle` `#테스트` `#프로세스`
+
+### 1) 발견 (Discovery)
+> 잔여 백로그 검증에서 `RUN_DB_IT=true ... ./gradlew test --rerun` 이 13초 만에 그린으로 끝나 의심스러워 리포트 XML 을 열어보니:
+
+```
+TEST-...PaymentLifecycleConcurrencyTest.xml:  tests="1" skipped="1"
+```
+
+환경변수를 분명히 넘겼는데 `@EnabledIfEnvironmentVariable(named="RUN_DB_IT")` 게이트가 닫혀 있었다. 소급 확인 결과 **#34 의 "로컬 재현 그린"도 실제로는 스킵된 채의 공허한 그린**이었다(그땐 CI 가 실검증을 대신함).
+
+### 2) 분석 (Analysis)
+Gradle 은 기본적으로 **데몬**에서 빌드를 실행하고, 테스트 포크 JVM 의 환경은 **데몬 프로세스의 환경**을 물려받는다. 데몬은 처음 뜬 셸의 환경으로 살아남으므로, 이후 셸에서 `RUN_DB_IT=true ./gradlew ...` 로 넘긴 변수는 클라이언트에만 있고 **데몬(과 테스트 JVM)에는 없다**. 게이트 어노테이션은 조용히 skip 하므로 BUILD SUCCESSFUL 이 "통과"처럼 보인다.
+
+### 3) 고찰 (Contemplation)
+- **방안 A — `./gradlew --stop` 후 env 를 실은 셸에서 재기동**: 데몬이 새 env 로 뜬다. 간단하지만 "잊으면 재발"하는 절차 의존.
+- **방안 B — build.gradle 에서 `test.environment` 로 클라이언트 env 명시 전달**: 구조적 해결이나, CI(잡 레벨 env)와 로컬의 이중 경로가 생기고 시크릿(TEST_DB_PASSWORD) 취급이 번거로움.
+- **방안 C — 실행 여부를 결과로 검증**: 어느 방안이든 "그린"만 믿지 말고 리포트 XML 의 `skipped` 카운트를 함께 확인.
+
+### 4) 해결 (Resolution)
+A + C 채택. 게이트 IT 로컬 실행 절차를 다음으로 고정한다:
+
+```bash
+./gradlew --stop                                  # 낡은 데몬 제거
+set -a; . ./.env; set +a
+export RUN_DB_IT=true RUN_REDIS_IT=true TEST_DB_PASSWORD="$DB_PASSWORD"
+./gradlew :module-core:test :module-api:test --rerun
+grep -o 'skipped="[0-9]*"' backend/*/build/test-results/test/TEST-*IT*.xml   # 실행 확인(0 이어야)
+```
+
+### 5) 결과 (Result)
+데몬 재기동 후 게이트 IT 3종(재고 동시성·결제 경합·SSE 스트림)이 실제 실행·통과함을 `skipped="0"` 으로 확인. 교훈: **게이트형 테스트의 그린은 두 번 의심하라 — "통과한 그린"과 "실행되지 않은 그린"은 로그 한 줄 차이다.** (No.14 의 "게이트는 exit code" 교훈의 짝: exit code 조차 스킵을 구분하지 못한다.)
