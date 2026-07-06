@@ -142,34 +142,48 @@ public class QueueService {
     }
 
     /**
-     * 여러 회원의 대기 순번을 <b>파이프라인 1회 왕복</b>으로 일괄 조회한다(1-based).
+     * 여러 회원의 대기 순번 + 총 대기 인원을 <b>파이프라인 1회 왕복</b>으로 일괄 조회한다(순번 1-based).
      *
      * <p>SSE 브로드캐스트의 벌크 경로(리뷰 M8). 구독자별 {@code ZRANK} 를 개별 왕복으로 보내면
      * 구독 N 에 비례해 네트워크 RTT 가 쌓여 브로드캐스트가 폴링 주기를 넘긴다
      * (실측: 구독자당 ~0.74ms, 2,000 구독에서 tick ~1.5s). 파이프라인은 명령 수는 같지만
      * 왕복을 1회로 합쳐 이 항을 제거한다.
      *
-     * @return memberId → 순번. <b>대기 중인 회원만</b> 담긴다(입장/이탈자는 키 없음).
+     * <p>{@code ZCARD} 를 <b>같은 파이프라인</b>에 동봉한다(리뷰2 M-6): 순번과 총원을 서로 다른
+     * 왕복으로 읽으면 그 사이 워커 소비만큼 어긋나 "내 순번 120 / 대기 80" 같은 모순 표시가
+     * 그룹 전체에 노출됐다. 같은 왕복이면 창이 서버 내 명령 처리 간격으로 줄어든다(표시용이라
+     * Lua 원자화까지는 불요 — 진실은 다음 tick 이 곧 따라잡는다).
      */
-    public Map<Long, Long> getPositions(Long goodsId, Collection<Long> memberIds) {
+    public QueueSnapshot getPositionsSnapshot(Long goodsId, Collection<Long> memberIds) {
         if (memberIds.isEmpty()) {
-            return Map.of();
+            return new QueueSnapshot(Map.of(), size(goodsId));
         }
         byte[] key = QueueKeys.waitingQueue(goodsId).getBytes(StandardCharsets.UTF_8);
         List<Long> ordered = List.copyOf(memberIds);
-        List<Object> ranks = redis.executePipelined((RedisCallback<Object>) connection -> {
+        List<Object> results = redis.executePipelined((RedisCallback<Object>) connection -> {
+            connection.zSetCommands().zCard(key);   // [0] = 총 대기 인원
             for (Long memberId : ordered) {
                 connection.zSetCommands().zRank(key, String.valueOf(memberId).getBytes(StandardCharsets.UTF_8));
             }
             return null;
         });
+        long waiting = results.get(0) instanceof Number count ? count.longValue() : 0L;
         Map<Long, Long> positions = new HashMap<>();
         for (int i = 0; i < ordered.size(); i++) {
-            if (ranks.get(i) instanceof Number rank) {
+            if (results.get(i + 1) instanceof Number rank) {
                 positions.put(ordered.get(i), rank.longValue() + 1);
             }
         }
-        return positions;
+        return new QueueSnapshot(positions, waiting);
+    }
+
+    /**
+     * {@link #getPositionsSnapshot} 의 결과 — 같은 왕복에서 읽은 순번 맵과 총 대기 인원.
+     *
+     * @param positions memberId → 순번(1-based). <b>대기 중인 회원만</b> 담긴다(입장/이탈자는 키 없음).
+     * @param waiting   총 대기 인원(같은 파이프라인의 ZCARD)
+     */
+    public record QueueSnapshot(Map<Long, Long> positions, long waiting) {
     }
 
     /** 현재 대기 인원 수. */

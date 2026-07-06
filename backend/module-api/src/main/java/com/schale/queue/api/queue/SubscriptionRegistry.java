@@ -29,9 +29,14 @@ public class SubscriptionRegistry {
         return emitters.put(key, emitter);
     }
 
-    /** 키-emitter 쌍이 일치할 때만 제거한다(다른 스레드가 이미 새 연결로 교체했으면 건드리지 않는다). */
-    public void remove(Subscription key, SseEmitter emitter) {
-        emitters.remove(key, emitter);
+    /**
+     * 키-emitter 쌍이 일치할 때만 제거한다(다른 스레드가 이미 새 연결로 교체했으면 건드리지 않는다).
+     *
+     * @return 실제로 제거했으면 {@code true}. admitted 전송의 <b>소유권 선점</b> 판정에 쓰인다
+     *         (리뷰2 M-4 — 초기 push 와 폴링 tick 중 remove 에 성공한 한쪽만 전송).
+     */
+    public boolean remove(Subscription key, SseEmitter emitter) {
+        return emitters.remove(key, emitter);
     }
 
     /** 폴링용 불변 스냅샷. 순회 중 원본이 변경돼도 안전하다. */

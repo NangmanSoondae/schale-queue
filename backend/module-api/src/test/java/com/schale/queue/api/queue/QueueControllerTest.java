@@ -45,6 +45,10 @@ class QueueControllerTest {
     @MockitoBean
     private GoodsService goodsService;
 
+    // 유령 엔트리 게이트(리뷰2 M-7). 기본 목은 false = 토큰 미보유(일반 진입).
+    @MockitoBean
+    private com.schale.queue.core.domain.queue.AdmissionTokenService admissionTokenService;
+
     @Test
     @DisplayName("대기열 진입은 201 Created 와 현재 순번/대기 인원을 반환한다")
     void enter_returns_201_with_position() throws Exception {
@@ -91,6 +95,20 @@ class QueueControllerTest {
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         then(queueService).should(never()).enqueue(eq(999L), eq(42L));
+    }
+
+    @Test
+    @DisplayName("유효한 입장 토큰 보유자의 재진입은 큐에 넣지 않고 200/position=0 을 반환한다(리뷰2 M-7 유령 엔트리 방지)")
+    void enter_skips_enqueue_for_admitted_member() throws Exception {
+        // given — admitted 후 뒤로가기로 재진입한 회원(토큰 유효)
+        given(admissionTokenService.hasValidToken(1L, 42L)).willReturn(true);
+        given(queueService.size(1L)).willReturn(10L);
+
+        // when & then — 재enqueue 없음(워커 admit 예산 소각·waiting 부풀림 차단), 입장 상태(0) 응답
+        mockMvc.perform(post("/api/v1/queue/1/entries").header(MEMBER_HEADER, 42L))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.position").value(0));
+        then(queueService).should(never()).enqueue(eq(1L), eq(42L));
     }
 
     @Test
