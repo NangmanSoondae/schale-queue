@@ -104,7 +104,8 @@ services:
     mem_limit: 768m          # per-container 상한(No.07 일관성)
     ports:
       # 호스트:컨테이너. 컨테이너 내부는 항상 8080. 호스트 포트는 API_PORT 로 오버라이드 가능
-      # (예: 8080 을 다른 서비스 — notify-gateway 등 — 가 점유 중이면 .env 에 API_PORT=8081).
+      # (8080 을 다른 프로세스가 점유 중이면 .env 에 API_PORT 를 다른 값으로.
+      #  notify-gateway 는 2026-07-06 부로 호스트 8081 사용 — 기본 8080 과 충돌 없음).
       - "${API_PORT:-8080}:8080"
     environment:
       DB_URL: jdbc:mariadb://mariadb:3306/${DB_NAME}
