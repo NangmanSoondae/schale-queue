@@ -80,9 +80,10 @@ docker compose exec -T mariadb sh -c 'mariadb -uschale -p"$MARIADB_PASSWORD" sch
 ```
 schale-queue/
 ├── backend/
-│   ├── module-core/     # 도메인·영속성 (대기열 Lua, 재고 락, 아웃박스)
-│   ├── module-api/      # REST API + SSE (Virtual Threads)
-│   └── module-worker/   # 대기열 소비·결제 만료·Kafka 컨슈머 (정산/알림)
+│   ├── module-core/       # 도메인·영속성 (대기열 Lua, 재고 락, 아웃박스)
+│   ├── module-api/        # REST API + SSE (Virtual Threads)
+│   ├── module-worker/     # 대기열 소비·결제 만료·Kafka 컨슈머 (정산/알림)
+│   └── module-admin-mcp/  # 🤖 AI 어드민 — Claude 가 자연어로 운영하는 MCP 서버 (ADR-009)
 ├── frontend/            # React 19 + Vite + TS, nginx 컨테이너 (/api 프록시·SSE 무버퍼링)
 ├── load/                # k6 시나리오 + SSE 벤치 + 시드 (부하 재현 하네스)
 └── docs/                # 기획 → 아키텍처 → ADR 8건 → SLO → 실측 리포트 → 트러블슈팅
@@ -93,7 +94,7 @@ schale-queue/
 | 분류 | 문서 |
 | :--- | :--- |
 | 설계 | [아키텍처](docs/2_architecture.md) · [도메인 정책](docs/11_domain_policy.md) · [기능 명세](docs/10_functional_spec.md) · [NFR/SLO](docs/9_nfr_and_slo.md) |
-| ADR | [엔티티 설계](docs/6_adr_001_entity_design.md) · [큐 하이브리드](docs/7_adr_002_queue_architecture.md) · [알림 외부화](docs/8_adr_003_notification_externalization.md) · [예약 재고](docs/12_adr_004_stock_reservation.md) · [컨텍스트 분리](docs/13_adr_005_bounded_context_split.md) · [환불 정책](docs/14_adr_006_refund_cancellation_policy.md) · [아웃박스](docs/15_adr_007_transactional_outbox.md) · [Flyway](docs/16_adr_008_schema_migration_flyway.md) |
+| ADR | [엔티티 설계](docs/6_adr_001_entity_design.md) · [큐 하이브리드](docs/7_adr_002_queue_architecture.md) · [알림 외부화](docs/8_adr_003_notification_externalization.md) · [예약 재고](docs/12_adr_004_stock_reservation.md) · [컨텍스트 분리](docs/13_adr_005_bounded_context_split.md) · [환불 정책](docs/14_adr_006_refund_cancellation_policy.md) · [아웃박스](docs/15_adr_007_transactional_outbox.md) · [Flyway](docs/16_adr_008_schema_migration_flyway.md) · [AI 어드민 MCP](docs/17_adr_009_ai_admin_mcp.md) |
 | 실측 | [Phase 3 부하 리포트](docs/load_test_report.md) · [Phase 5 통합 리포트](docs/load_test_report_phase5.md) |
 | 기록 | [트러블슈팅 일지 13건](docs/troubleshooting.md) — 발견→분석→고찰→해결→결과 5단계 포맷 |
 
