@@ -95,7 +95,7 @@ schale-queue/
 │   ├── module-core/     # 도메인 · 영속성 (라이브러리)
 │   ├── module-api/      # REST API (실행 모듈)
 │   └── module-worker/   # 대기열/이벤트 컨슈머 (실행 모듈)
-├── frontend/            # React 클라이언트 (Vite + TS, 대기열→주문 플로우)
+├── frontend/            # React 클라이언트 (Vite + TS, 대기열→주문 플로우, nginx 컨테이너)
 └── docs/
     ├── 1~6_*.md         # 기획 · 아키텍처 · 로드맵 · 환경 · 행동강령 · ADR
     ├── troubleshooting.md
