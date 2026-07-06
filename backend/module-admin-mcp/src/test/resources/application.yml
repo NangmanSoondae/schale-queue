@@ -1,0 +1,15 @@
+# 어드민 MCP '테스트' 오버라이드.
+#
+# 운영 설정은 Flyway 를 끄고 validate 만 한다(스키마 소유권은 api/worker — ADR-009 §3).
+# 그러나 CI 의 신선한 MariaDB 서비스 컨테이너에서는 모듈 테스트 실행 순서상 이 모듈이
+# core(스키마를 만드는 테스트 컨텍스트)보다 먼저 돌 수 있어, validate 가 '스키마 없음'으로
+# 실패한다. 테스트 컨텍스트만 Flyway 를 켜 스키마를 스스로 보장한다(버전드 마이그레이션이라
+# 다른 모듈 테스트와의 공존은 멱등).
+spring:
+  flyway:
+    enabled: true
+
+  datasource:
+    url: ${TEST_DB_URL:jdbc:mariadb://localhost:3306/schale_queue}
+    username: ${TEST_DB_USERNAME:schale}
+    password: ${TEST_DB_PASSWORD:schale}
