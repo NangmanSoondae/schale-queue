@@ -1,0 +1,90 @@
+name: Release Images (GHCR)
+
+# v2-a: 릴리스 태그(v*)가 푸시되면 api / worker / frontend 3종 이미지를 GHCR 에 발행한다.
+# 누구나 소스 빌드 없이 docker-compose.ghcr.yml 로 풀스택을 재현할 수 있게 하는 것이 목적
+# (docs/3_roadmap.md v2-a — "소스 빌드 없이 이미지만으로 풀스택이 뜨는가?").
+#
+# workflow_dispatch(tag 입력)는 워크플로 도입 이전에 만들어진 태그(v1.0.0)의 소급 발행용:
+# 태그 시점 스냅샷에는 이 워크플로 파일이 없어 태그 ref 로는 디스패치할 수 없으므로,
+# main 에서 실행하되 입력받은 태그를 체크아웃해 빌드한다.
+#
+# latest 태그는 매 발행마다 갱신된다 — 과거 태그를 소급 발행할 때는 latest 가
+# 과거 버전으로 되감기므로, 소급 발행 후에는 최신 태그를 재발행하거나 순서에 유의한다.
+#
+# GITHUB_TOKEN 의 packages:write 로 충분 — 별도 시크릿(PAT)을 만들지 않는다(§5.3.2).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '발행할 기존 태그 (예: v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-images-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 백엔드 2종은 멀티모듈이라 빌드 컨텍스트가 레포 루트다 (docker-compose.yml 과 동일 구성)
+          - name: api
+            context: .
+            dockerfile: backend/module-api/Dockerfile
+          - name: worker
+            context: .
+            dockerfile: backend/module-worker/Dockerfile
+          - name: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - name: Resolve tag & version
+        id: ver
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::태그 형식이 v<semver> 가 아닙니다: $TAG"; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout (해당 태그 스냅샷)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/nangmansoondae/schale-queue-${{ matrix.name }}:${{ steps.ver.outputs.version }}
+            ghcr.io/nangmansoondae/schale-queue-${{ matrix.name }}:latest
+          cache-from: type=gha,scope=release-${{ matrix.name }}
+          cache-to: type=gha,scope=release-${{ matrix.name }},mode=max
