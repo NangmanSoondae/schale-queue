@@ -66,6 +66,17 @@
 
 ## 🚀 빠른 시작
 
+**옵션 A — 발행 이미지로 (빌드 불필요, GHCR)**
+
+```bash
+cp .env.example .env          # 값 채우기 (DB 비밀번호 등 — 시크릿은 커밋 금지)
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml --profile app pull
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml --profile app up -d --no-build
+docker compose exec -T mariadb sh -c 'mariadb -uschale -p"$MARIADB_PASSWORD" schale_queue' < load/seed/demo_seed.sql
+```
+
+**옵션 B — 소스 빌드로**
+
 ```bash
 cp .env.example .env          # 값 채우기 (DB 비밀번호 등 — 시크릿은 커밋 금지)
 docker compose --profile app up -d --build    # 인프라 3종 + api + worker + frontend 풀스택
