@@ -11,6 +11,13 @@ name: Release Images (GHCR)
 # latest 태그는 매 발행마다 갱신된다 — 과거 태그를 소급 발행할 때는 latest 가
 # 과거 버전으로 되감기므로, 소급 발행 후에는 최신 태그를 재발행하거나 순서에 유의한다.
 #
+# multi-arch(v2-b): Oracle A1 등 arm64 호스트 지원을 위해 linux/amd64 + linux/arm64
+# 매니페스트로 발행한다. 무거운 빌드 스테이지(Gradle/npm)는 각 Dockerfile 이
+# --platform=$BUILDPLATFORM 으로 러너 네이티브 실행하므로, QEMU 에뮬레이션은 가벼운
+# 런타임 스테이지에만 적용된다(에뮬레이션 저속 빌드 회피 — 산출물이 arch 독립이라 가능).
+# ⚠️ 이 패턴 도입(2026-07-14) 이전 태그를 소급 발행하면 빌드 전체가 에뮬레이션되어
+# 매우 느리다 — 과거 태그 재발행보다는 새 태그 발행을 권장.
+#
 # GITHUB_TOKEN 의 packages:write 로 충분 — 별도 시크릿(PAT)을 만들지 않는다(§5.3.2).
 
 on:
@@ -67,6 +74,10 @@ jobs:
         with:
           ref: ${{ steps.ver.outputs.tag }}
 
+      # arm64 런타임 스테이지 실행용 에뮬레이터 (빌드 스테이지는 네이티브 — 상단 주석 참조)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -82,6 +93,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/nangmansoondae/schale-queue-${{ matrix.name }}:${{ steps.ver.outputs.version }}

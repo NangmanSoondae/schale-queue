@@ -66,7 +66,7 @@
 
 ## 🚀 빠른 시작
 
-**옵션 A — 발행 이미지로 (빌드 불필요, GHCR)**
+**옵션 A — 발행 이미지로 (빌드 불필요, GHCR · `linux/amd64`+`arm64` multi-arch)**
 
 ```bash
 cp .env.example .env          # 값 채우기 (DB 비밀번호 등 — 시크릿은 커밋 금지)

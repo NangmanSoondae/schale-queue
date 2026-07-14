@@ -8,7 +8,9 @@
 # ============================================================================
 
 # ---- build stage : gradle 래퍼로 bootJar 생성 ----
-FROM eclipse-temurin:21-jdk AS build
+# --platform=$BUILDPLATFORM: jar 는 아키텍처 독립(바이트코드)이므로 빌드는 항상 러너
+# 네이티브로 1회만 수행한다 — multi-arch 발행 시 Gradle 이 QEMU 에뮬레이션되는 것을 방지.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
 # 1) 의존성 레이어 캐시: 래퍼·빌드스크립트만 먼저 복사 → 소스 변경 시 의존성 재다운로드 회피
