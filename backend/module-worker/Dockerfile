@@ -7,7 +7,8 @@
 # ============================================================================
 
 # ---- build stage ----
-FROM eclipse-temurin:21-jdk AS build
+# --platform=$BUILDPLATFORM: jar 는 arch 독립 — multi-arch 발행 시 네이티브 빌드 1회 (api Dockerfile 참조)
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace
 
 COPY gradlew settings.gradle build.gradle ./
