@@ -1,7 +1,7 @@
 # 🎫 Schale Queue (샬레 큐)
 
 > **순간 폭증하는 트래픽을 대기열로 평탄화하고, 한정 재고를 단 1개도 초과 판매하지 않는**
-> 선착순 예매·커머스 백엔드. 설계 결정(ADR 8건)과 부하 실측(리포트 2건)으로 증명한다.
+> 선착순 예매·커머스 백엔드. 설계 결정(ADR 9건)과 부하 실측(리포트 2건)으로 증명한다.
 
 <p align="center">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white">
@@ -62,7 +62,7 @@
 </details>
 
 > 부하테스트는 성능 수치만 남긴 게 아니라 **잠복 결함 5건을 실측으로 적발·수정**했다
-> (스키마 불일치, 워커 부팅 불가, SSE 브로드캐스트 포화, ERROR 로그 오탐 등 — [트러블슈팅 일지](docs/troubleshooting.md) 13건에 인과관계 5단계로 기록).
+> (스키마 불일치, 워커 부팅 불가, SSE 브로드캐스트 포화, ERROR 로그 오탐 등 — [트러블슈팅 일지](docs/troubleshooting.md) 16건에 인과관계 5단계로 기록).
 
 ## 🚀 빠른 시작
 
@@ -97,7 +97,7 @@ schale-queue/
 │   └── module-admin-mcp/  # 🤖 AI 어드민 — Claude 가 자연어로 운영하는 MCP 서버 (ADR-009)
 ├── frontend/            # React 19 + Vite + TS, nginx 컨테이너 (/api 프록시·SSE 무버퍼링)
 ├── load/                # k6 시나리오 + SSE 벤치 + 시드 (부하 재현 하네스)
-└── docs/                # 기획 → 아키텍처 → ADR 8건 → SLO → 실측 리포트 → 트러블슈팅
+└── docs/                # 기획 → 아키텍처 → ADR 9건 → SLO → 실측 리포트 → 트러블슈팅
 ```
 
 ## 📚 문서 인덱스 — 의사결정의 궤적
